@@ -13,8 +13,13 @@
   lapso de ese día"; al día siguiente la marca desaparece y la llevan los nuevos.
   `/api/admin/conversations` agrega un `$lookup` de la PRIMERA Transaction `deposit`
   (sin `payout_refund`) del cliente → `firstDepositAt` y `firstDepositToday` (≥ 00:00
-  ART de hoy). El panel (admin-sw v61) pinta un chip verde "🆕 1ª CARGA HOY" antes del
-  nombre en `renderConversations`. Sin estado ni cron: se calcula al listar.
+  ART de hoy). El panel pinta un chip verde solo con "🆕" antes del nombre en
+  `renderConversations` (owner: el texto largo tapaba el nombre/publicista). Sin estado
+  ni cron: se calcula al listar.
+- #304b: la lista también muestra el **modo de carga** elegido (#295) al final del nombre,
+  a la derecha del publicista: ⚡ automática / 💬 con agente (`depositMode` en el
+  `$project` de `/api/admin/conversations`; antes solo se veía entrando al chat).
+  admin-sw v62.
 
 ## Sesión 2026-09-25
 

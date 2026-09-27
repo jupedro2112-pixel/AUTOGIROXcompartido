@@ -1859,7 +1859,7 @@ function _renderConversationsNow() {
                 <span class="icon icon-user"></span>
             </div>
             <div class="conv-info">
-                <span class="conv-name">${conv.firstDepositToday ? `<span class="conv-new" title="Usuario NUEVO: hizo su PRIMERA carga hoy (la marca desaparece mañana)" style="display:inline-block;background:linear-gradient(135deg,#26e07f,#0f9d58);color:#00301a;border-radius:6px;padding:0 5px;font-size:9.5px;font-weight:900;margin-right:4px;vertical-align:middle;">🆕 1ª CARGA HOY</span>` : ''}${escapeHtml(conv.username)}${conv.publisher ? ` <span class="conv-publisher" title="Captado por la pauta de ${escapeHtml(conv.publisher)}">📣 ${escapeHtml(conv.publisher)}</span>` : ''}</span>
+                <span class="conv-name">${conv.firstDepositToday ? `<span class="conv-new" title="Usuario NUEVO: hizo su PRIMERA carga hoy (la marca desaparece mañana)" style="display:inline-block;background:linear-gradient(135deg,#26e07f,#0f9d58);border-radius:5px;padding:0 3px;font-size:10px;line-height:15px;margin-right:4px;vertical-align:middle;">🆕</span>` : ''}${escapeHtml(conv.username)}${conv.publisher ? ` <span class="conv-publisher" title="Captado por la pauta de ${escapeHtml(conv.publisher)}">📣 ${escapeHtml(conv.publisher)}</span>` : ''}${conv.depositMode === 'manual' ? ` <span title="Eligió CARGA CON AGENTE (por chat)" style="font-size:11px;">💬</span>` : (conv.depositMode === 'auto' ? ` <span title="Eligió CARGA AUTOMÁTICA (CBU + comprobante)" style="font-size:11px;">⚡</span>` : '')}</span>
                 <span class="conv-preview">${escapeHtml(conv.lastMessage || 'Sin mensajes')}</span>
                 ${tagsHtml}
             </div>

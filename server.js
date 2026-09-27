@@ -17552,6 +17552,7 @@ app.get('/api/admin/conversations', authMiddleware, adminMiddleware, async (req,
           username: '$user.username',
           balance: { $ifNull: ['$user.balance', 0] },
           firstDepositAt: { $arrayElemAt: ['$firstDep.timestamp', 0] },
+          depositMode: { $ifNull: ['$user.depositMode', null] }, // #304b: ⚡ auto / 💬 con agente
           online: { $gt: [{ $ifNull: ['$user.lastLogin', new Date(0)] }, { $subtract: [new Date(), 300000] }] },
           unread: { $ifNull: [{ $arrayElemAt: ['$unread.count', 0] }, 0] },
           lastMessage: { $arrayElemAt: ['$lastMsg.content', 0] },
