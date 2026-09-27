@@ -1859,7 +1859,7 @@ function _renderConversationsNow() {
                 <span class="icon icon-user"></span>
             </div>
             <div class="conv-info">
-                <span class="conv-name">${escapeHtml(conv.username)}${conv.publisher ? ` <span class="conv-publisher" title="Captado por la pauta de ${escapeHtml(conv.publisher)}">📣 ${escapeHtml(conv.publisher)}</span>` : ''}</span>
+                <span class="conv-name">${conv.firstDepositToday ? `<span class="conv-new" title="Usuario NUEVO: hizo su PRIMERA carga hoy (la marca desaparece mañana)" style="display:inline-block;background:linear-gradient(135deg,#26e07f,#0f9d58);color:#00301a;border-radius:6px;padding:0 5px;font-size:9.5px;font-weight:900;margin-right:4px;vertical-align:middle;">🆕 1ª CARGA HOY</span>` : ''}${escapeHtml(conv.username)}${conv.publisher ? ` <span class="conv-publisher" title="Captado por la pauta de ${escapeHtml(conv.publisher)}">📣 ${escapeHtml(conv.publisher)}</span>` : ''}</span>
                 <span class="conv-preview">${escapeHtml(conv.lastMessage || 'Sin mensajes')}</span>
                 ${tagsHtml}
             </div>

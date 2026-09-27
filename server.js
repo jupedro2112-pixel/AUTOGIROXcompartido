@@ -17529,10 +17529,29 @@ app.get('/api/admin/conversations', authMiddleware, adminMiddleware, async (req,
         }
       },
       {
+        // #304: primera carga del cliente (para marcar "🆕 1ª carga hoy" en la lista).
+        $lookup: {
+          from: 'transactions',
+          let: { uid: '$userId' },
+          pipeline: [
+            { $match: { $expr: { $and: [
+              { $eq: ['$userId', '$$uid'] },
+              { $eq: ['$type', 'deposit'] },
+              { $ne: ['$metadata.source', 'payout_refund'] }
+            ]}}},
+            { $sort: { timestamp: 1 } },
+            { $limit: 1 },
+            { $project: { timestamp: 1 } }
+          ],
+          as: 'firstDep'
+        }
+      },
+      {
         $project: {
           userId: 1,
           username: '$user.username',
           balance: { $ifNull: ['$user.balance', 0] },
+          firstDepositAt: { $arrayElemAt: ['$firstDep.timestamp', 0] },
           online: { $gt: [{ $ifNull: ['$user.lastLogin', new Date(0)] }, { $subtract: [new Date(), 300000] }] },
           unread: { $ifNull: [{ $arrayElemAt: ['$unread.count', 0] }, 0] },
           lastMessage: { $arrayElemAt: ['$lastMsg.content', 0] },
@@ -17548,6 +17567,12 @@ app.get('/api/admin/conversations', authMiddleware, adminMiddleware, async (req,
     let conversations = await ChatStatus.aggregate(pipeline);
     const hasMore = isClosed && conversations.length > 100;
     if (hasMore) conversations = conversations.slice(0, 100);
+    // #304 (owner 2026-09-27): marca "usuario NUEVO" = hizo su PRIMERA carga HOY
+    // (día argentino). Mañana la marca desaparece sola y la llevan los de mañana.
+    const _todayStart = new Date(_rouletteDateKeyART() + 'T00:00:00-03:00');
+    for (const c of conversations) {
+      c.firstDepositToday = !!(c.firstDepositAt && new Date(c.firstDepositAt) >= _todayStart);
+    }
 
     // Total de páginas para el paginador numerado del panel (solo closed).
     // countDocuments sobre el índice {status, lastMessageAt} — barato.

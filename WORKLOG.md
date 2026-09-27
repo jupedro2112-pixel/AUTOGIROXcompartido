@@ -6,6 +6,16 @@
 >
 > **Última actualización: 2026-09-24**
 
+## Sesión 2026-09-27
+
+### 304. Chats: marca "🆕 1ª CARGA HOY" para los usuarios nuevos del día
+- Owner: marcar en la lista de Chats a los usuarios nuevos "de esa primera carga en el
+  lapso de ese día"; al día siguiente la marca desaparece y la llevan los nuevos.
+  `/api/admin/conversations` agrega un `$lookup` de la PRIMERA Transaction `deposit`
+  (sin `payout_refund`) del cliente → `firstDepositAt` y `firstDepositToday` (≥ 00:00
+  ART de hoy). El panel (admin-sw v61) pinta un chip verde "🆕 1ª CARGA HOY" antes del
+  nombre en `renderConversations`. Sin estado ni cron: se calcula al listar.
+
 ## Sesión 2026-09-25
 
 ### 303. Premios "% EXTRA en la próxima carga": Bonificación propia en Transacciones + marcados en Ruleta diaria
