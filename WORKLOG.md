@@ -6,6 +6,22 @@
 >
 > **Última actualización: 2026-09-24**
 
+## Sesión 2026-09-28
+
+### 305. Ruleta diaria: el % EXTRA vence a las 24 h del giro (y se avisa)
+- Owner: "todo lo que sea bono en ruleta diaria que sea 24 h para reclamar y que aclare que
+  es reclamable por 24 h". Los premios en SALDO no cambian (se acreditan al girar).
+- Backend: `DAILY_PCT_TTL_MS` (24 h), `_expireDailyRoulettePct(userId|null)`: limpia
+  `dailyRoulettePendingPct` de quien pasó las 24 h (`dailyRouletteWonAt`), marca el giro
+  `percent_expired` (`usedBy 'vencido (24 h)'`) y deja nota ⌛ en el chat. Corre cada 15
+  min (cron, idempotente multi-instancia) + lazy en `claimDailyRoulettePercent` (que
+  además exige `wonAt ≥ ahora − 24 h`) y en el status de la ruleta. Summary/status
+  devuelven `pendingExpiresAt` y `pctTtlHours: 24`; el spin devuelve `expiresAt`.
+- PWA (SW v183): rueda → "⏳ Reclamable por 24 horas: cargá antes de que venza";
+  hub → "vence en Xh Ym" con el % pendiente; subtítulos "los % extra valen 24 h".
+- Panel (admin-sw v63): historial con "⌛ % VENCIDO" y "vence <fecha>" en los
+  pendientes; card "% EXTRA aplicados" suma "· N vencidos".
+
 ## Sesión 2026-09-27
 
 ### 304. Chats: marca "🆕 1ª CARGA HOY" para los usuarios nuevos del día

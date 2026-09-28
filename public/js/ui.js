@@ -3299,14 +3299,14 @@ VIP.ui.openRewardsHub = function() {
       body = '<div style="font-size:13px;color:#9aa4b0;">Un giro gratis TODOS los días con premios en % extra y saldo. 🔒 Disponible muy pronto.</div>';
       cta = _rwCta('🔒 Muy pronto', '', false, '#26e07f');
     } else if (dy.canSpin) {
-      body = '<div style="font-size:13px;color:#cfd6de;line-height:1.4;">Tu giro <b style="color:#26e07f;">GRATIS de HOY</b> está disponible. Premios en % extra y saldo directo.</div>';
+      body = '<div style="font-size:13px;color:#cfd6de;line-height:1.4;">Tu giro <b style="color:#26e07f;">GRATIS de HOY</b> está disponible. Premios en % extra (reclamable por <b>24 h</b> en tu próxima carga) y saldo directo.</div>';
       cta = _rwCta('🎰 GIRAR LA RULETA DE HOY', 'VIP.ui._rwSpinDaily()', true, '#26e07f');
     } else if (dy.needsDeposit) {
       body = '<div style="font-size:13px;color:#cfd6de;line-height:1.4;">Hacé tu <b>primera carga</b> y desbloqueás un giro gratis <b>todos los días</b>.</div>';
       cta = _rwCta('💳 Hacer mi primera carga', "VIP.ui.closeRewardsHub();VIP.ui.casinoBotGo('deposit')", true, '#26e07f');
     } else if (dy.alreadySpun) {
       const tp = dy.todayPrize || {};
-      let st = tp.type === 'percent' ? ('Hoy ganaste <b style="color:#26e07f;">' + _wrEsc(tp.label || '') + '</b>' + (dy.pendingPct > 0 ? ' — se aplica en tu próxima carga' : ' — ya aplicado'))
+      let st = tp.type === 'percent' ? ('Hoy ganaste <b style="color:#26e07f;">' + _wrEsc(tp.label || '') + '</b>' + (dy.pendingPct > 0 ? ' — se aplica en tu próxima carga · <b style="color:#ffd700;">vence en ' + _rwCountdown(dy.pendingExpiresAt) + '</b> ⏳' : ' — ya aplicado o vencido'))
         : tp.type === 'cash' && tp.prizeARS > 0 ? ('Hoy ganaste <b style="color:#26e07f;">' + _rwFmt(tp.prizeARS) + '</b> — acreditado 💰')
         : 'Hoy no hubo suerte 😅';
       body = '<div style="font-size:13px;color:#cfd6de;line-height:1.45;">' + st + '<br>' +
@@ -3549,7 +3549,7 @@ VIP.ui._renderDailyRoulette = function() {
       'style="position:absolute;top:12px;right:12px;width:38px;height:38px;border-radius:50%;border:none;background:rgba(255,255,255,.14);' +
       'color:#fff;font-size:20px;font-weight:900;cursor:pointer;">✕</button>' +
     '<div style="color:#26e07f;font-size:22px;font-weight:900;text-align:center;text-shadow:0 2px 6px rgba(0,0,0,.6);">🎰 RULETA DIARIA</div>' +
-    '<div style="color:#fff;opacity:.85;font-size:14px;margin:4px 0 16px;text-align:center;">Un giro gratis por día. ¡Suerte!</div>' +
+    '<div style="color:#fff;opacity:.85;font-size:14px;margin:4px 0 16px;text-align:center;">Un giro gratis por día. Los % extra valen 24 h. ¡Suerte!</div>' +
     VIP.ui._wheelMarkup({ S: S, segs: segs, fs: fs, accent: '#26e07f', accent2: '#0f9d58',
       palette: ['#0b3d2a', '#1a1a4a', '#0e6b4a', '#2b0a3d', '#0b3d5a', '#3a2c00'] }) +
     '<div id="wrResult" style="color:#fff;text-align:center;font-size:15px;line-height:1.35;max-width:360px;"></div>' +
@@ -3590,7 +3590,7 @@ VIP.ui.casinoDailySpin = function() {
           detalle = '💰 Ya está <b>ACREDITADO</b> en tu saldo.' + (p.rolloverX > 0 ? '<br><span style="font-size:12px;opacity:.8;">Para retirarlo, apostá ' + p.rolloverX + ' veces el premio.</span>' : '');
         } else if (p.type === 'percent') {
           titulo = '🎉 ¡Ganaste ' + _wrEsc(p.prizeLabel) + '!';
-          detalle = 'Se suma automático en tu <b>PRÓXIMA CARGA</b>. 💪';
+          detalle = 'Se suma automático en tu <b>PRÓXIMA CARGA</b>. 💪<br><span style="font-size:12.5px;color:#ffd700;">⏳ Reclamable por <b>24 horas</b>: cargá antes de que venza.</span>';
         } else {
           titulo = '😅 Hoy no hubo suerte';
           detalle = '⏰ Tu próximo giro gratis es en <b>24 horas</b>. ¡Volvé a intentar!';

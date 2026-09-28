@@ -10259,7 +10259,7 @@ async function loadRouletteAdmin() {
         html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(102,255,102,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Ganadores</div><div style="color:#66ff66;font-size:22px;font-weight:900;margin-top:2px;">' + fmtNum(t.winnersTotal) + '</div><div style="color:#888;font-size:10px;">' + (t.spinsTotal > 0 ? ((t.winnersTotal / t.spinsTotal * 100).toFixed(1) + '%') : '—') + '</div></div>';
         html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,215,0,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">$ Regalado</div><div style="color:#ffd700;font-size:22px;font-weight:900;margin-top:2px;">' + fmtMoney(t.givenTotal) + '</div></div>';
         // #303: premios % EXTRA (bono para la próxima carga): cuántos se ganaron, cuántos ya se aplicaron y $ que generaron.
-        html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(38,224,127,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">% EXTRA aplicados</div><div style="color:#26e07f;font-size:22px;font-weight:900;margin-top:2px;">' + fmtNum(t.pctUsedTotal) + ' <span style="font-size:12px;color:#aaa;">/ ' + fmtNum(t.pctWonTotal) + ' ganados</span></div></div>';
+        html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(38,224,127,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">% EXTRA aplicados</div><div style="color:#26e07f;font-size:22px;font-weight:900;margin-top:2px;">' + fmtNum(t.pctUsedTotal) + ' <span style="font-size:12px;color:#aaa;">/ ' + fmtNum(t.pctWonTotal) + ' ganados' + (t.pctExpiredTotal > 0 ? ' · ' + fmtNum(t.pctExpiredTotal) + ' vencidos' : '') + '</span></div></div>';
         html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(38,224,127,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">$ Bono por % EXTRA</div><div style="color:#26e07f;font-size:22px;font-weight:900;margin-top:2px;">' + fmtMoney(t.pctBonusTotal) + '</div></div>';
         if (t.pendingTotal > 0) html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,128,128,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">$ Pendiente</div><div style="color:#ff8080;font-size:22px;font-weight:900;margin-top:2px;">' + fmtMoney(t.pendingTotal) + '</div><div style="color:#888;font-size:10px;">credit fallido</div></div>';
         html += '</div>';
@@ -10331,7 +10331,8 @@ async function loadRouletteAdmin() {
                     credit_failed: '<span style="background:rgba(255,128,128,0.15);color:#ff8080;border:1px solid #ff8080;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">❌ FALLO</span>',
                     // #303: premios % EXTRA (para la próxima carga).
                     percent_pending: '<span style="background:rgba(255,215,0,0.12);color:#ffd700;border:1px solid #ffd700;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">🎁 % PENDIENTE</span>',
-                    percent_used:    '<span style="background:rgba(38,224,127,0.15);color:#26e07f;border:1px solid #26e07f;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">✅ % APLICADO</span>'
+                    percent_used:    '<span style="background:rgba(38,224,127,0.15);color:#26e07f;border:1px solid #26e07f;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">✅ % APLICADO</span>',
+                    percent_expired: '<span style="background:rgba(136,136,136,0.15);color:#aaa;border:1px solid #888;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">⌛ % VENCIDO</span>'
                 }[it.status] || it.status;
                 html += '<tr style="border-top:1px solid rgba(255,255,255,0.05);">';
                 html += '<td style="padding:7px 10px;color:#aaa;font-size:10.5px;white-space:nowrap;">' + escapeHtml(when) + '</td>';
@@ -10345,7 +10346,11 @@ async function loadRouletteAdmin() {
                         (it.usedOnAmount > 0 ? ' sobre carga ' + fmtMoney(it.usedOnAmount) : '') + '</span>' +
                         '<div style="color:#888;">' + (it.usedAt ? escapeHtml(fmtFechaHoraAR(it.usedAt)) : '') + (it.usedBy ? ' · ' + escapeHtml(it.usedBy) : '') + '</div>';
                 } else if (it.status === 'percent_pending') {
-                    html += '<span style="color:#ffd700;font-family:inherit;">se aplica en su próxima carga</span>';
+                    // #305: vence a las 24 h del giro.
+                    const _exp = it.spunAt ? new Date(new Date(it.spunAt).getTime() + 24 * 3600 * 1000) : null;
+                    html += '<span style="color:#ffd700;font-family:inherit;">se aplica en su próxima carga · vence ' + (_exp ? escapeHtml(fmtFechaHoraAR(_exp)) : '') + '</span>';
+                } else if (it.status === 'percent_expired') {
+                    html += '<span style="color:#aaa;font-family:inherit;">pasaron 24 h sin cargar' + (it.usedAt ? ' · ' + escapeHtml(fmtFechaHoraAR(it.usedAt)) : '') + '</span>';
                 } else if (it.status === 'credited' && it.creditTxId) {
                     html += escapeHtml(String(it.creditTxId).slice(0, 18));
                 } else if (it.status === 'credit_failed') {

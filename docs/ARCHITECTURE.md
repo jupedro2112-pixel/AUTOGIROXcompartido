@@ -650,7 +650,9 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   1ª carga y lote dejan además una Transaction `bonus` propia
   (`_recordAppliedBonusTx`, `metadata.appliedOnDeposit:true` → la base del cashback
   la excluye porque ya cuenta `deposit.bonus`); el giro diario pasa a
-  `percent_used` (`_markDailySpinPctUsed`).
+  `percent_used` (`_markDailySpinPctUsed`). **El % EXTRA vence a las 24 h del giro
+  (#305):** `_expireDailyRoulettePct` (cron 15 min + lazy en claim/status) → giro
+  `percent_expired`, nota ⌛ en el chat.
 - **Hub "🎁 PREMIOS" + Ruleta diaria v2 + Cashback instantáneo (#254, 2026-09-01).**
   Botón flotante `#casinoRewardsBtn` (izquierda del casino, puntito rojo si hay algo
   reclamable) → overlay `#rwHubOverlay` con 3 tarjetas; `GET /api/rewards/summary` trae

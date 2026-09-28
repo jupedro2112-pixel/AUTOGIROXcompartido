@@ -44,7 +44,8 @@ const spinSchema = new mongoose.Schema({
     type: String,
     // #303: 'percent_used' = el % EXTRA se aplicó en una carga (o el agente
     // cargó bonus a mano y el premio quedó consumido).
-    enum: ['no_prize', 'won', 'credited', 'credit_failed', 'percent_pending', 'percent_used'],
+    // #305: 'percent_expired' = pasaron 24 h sin cargar → el % se perdió.
+    enum: ['no_prize', 'won', 'credited', 'credit_failed', 'percent_pending', 'percent_used', 'percent_expired'],
     default: 'won',
     index: true
   },

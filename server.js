@@ -611,10 +611,33 @@ async function revertWelcomeRoulettePercent(userId, usedBy) {
 
 // RULETA DIARIA (#254) — % EXTRA pendiente del giro del día. Mismo contrato que
 // los de bienvenida: reserva atómica (pct>0 → 0) y reversión si la carga falla.
+// #305 (owner 2026-09-28): el % EXTRA de la ruleta diaria es reclamable por 24 h
+// desde el giro. Pasado eso se pierde (cron _expireDailyRoulettePct + chequeo
+// lazy acá). Los premios en saldo no vencen: se acreditan al girar.
+const DAILY_PCT_TTL_MS = 24 * 60 * 60 * 1000;
+function _dailyPctExpiresAt(wonAt) { return wonAt ? new Date(new Date(wonAt).getTime() + DAILY_PCT_TTL_MS) : null; }
+async function _expireDailyRoulettePct(userId) {
+  // Vence el % pendiente de UN usuario (o de todos si userId es null).
+  const cutoff = new Date(Date.now() - DAILY_PCT_TTL_MS);
+  const q = { dailyRoulettePendingPct: { $gt: 0 }, dailyRouletteWonAt: { $lt: cutoff } };
+  if (userId) q.id = userId;
+  const users = await User.find(q).select('id username dailyRoulettePendingPct dailyRoulettePendingLabel').lean();
+  for (const u of users) {
+    const r = await User.updateOne({ id: u.id, dailyRoulettePendingPct: u.dailyRoulettePendingPct }, { $set: { dailyRoulettePendingPct: 0, dailyRoulettePendingLabel: null } });
+    if (!r || !r.modifiedCount) continue; // otra instancia lo hizo / se usó justo
+    await DailyRouletteSpin.updateOne({ userId: u.id, status: 'percent_pending' }, { $set: { status: 'percent_expired', usedAt: new Date(), usedBy: 'vencido (24 h)' } }).catch(() => {});
+    try { await _emitAdminOnlyChatNote(u.id, u.username, `⌛ Ruleta DIARIA: el ${u.dailyRoulettePendingPct}% EXTRA (${u.dailyRoulettePendingLabel || ''}) VENCIÓ — pasaron 24 h sin cargar. Ya no se aplica.`); } catch (_) {}
+    logger.info(`[ROULETTE] % EXTRA vencido: ${u.username} (${u.dailyRoulettePendingPct}%)`);
+  }
+  return users.length;
+}
+setInterval(() => { _expireDailyRoulettePct(null).catch((e) => logger.warn(`[ROULETTE] cron vencimiento % falló: ${e.message}`)); }, 15 * 60 * 1000);
+
 async function claimDailyRoulettePercent(userId, usedBy) {
   try {
+    try { await _expireDailyRoulettePct(userId); } catch (_) {} // #305: si venció, no se aplica
     const claim = await User.findOneAndUpdate(
-      { id: userId, dailyRoulettePendingPct: { $gt: 0 } },
+      { id: userId, dailyRoulettePendingPct: { $gt: 0 }, dailyRouletteWonAt: { $gte: new Date(Date.now() - DAILY_PCT_TTL_MS) } },
       { $set: { dailyRoulettePendingPct: 0, dailyRoulettePendingLabel: null } },
       { new: false }
     ).select('dailyRoulettePendingPct dailyRoulettePendingLabel').lean();
@@ -13143,7 +13166,9 @@ app.get('/api/rewards/summary', authMiddleware, async (req, res) => {
         segments: dCfg.prizes.map(p => ({ label: p.label })),
         todayPrize: spin ? { label: spin.prizeLabel, type: spin.prizeType || (spin.prizeARS > 0 ? 'cash' : 'none'), prizeARS: spin.prizeARS, prizePct: spin.prizePct || 0, status: spin.status } : null,
         pendingPct: (u && u.dailyRoulettePendingPct) || 0,
-        pendingLabel: (u && u.dailyRoulettePendingLabel) || null
+        pendingLabel: (u && u.dailyRoulettePendingLabel) || null,
+        pendingExpiresAt: (u && u.dailyRoulettePendingPct > 0) ? _dailyPctExpiresAt(u.dailyRouletteWonAt) : null, // #305
+        pctTtlHours: 24
       };
     } catch (e) { logger.warn(`[rewards] resumen ruletas falló: ${e.message}`); }
 
@@ -19204,7 +19229,8 @@ app.get('/api/roulette/status', authMiddleware, async (req, res) => {
     const eligible = cfg.enabled && appOk && dep.ok;
     const cd = await _dailyRouletteCooldown(userId);
     const spin = cd.canSpin ? null : cd.lastSpin;
-    const uPend = await User.findOne({ id: userId }).select('dailyRoulettePendingPct dailyRoulettePendingLabel').lean();
+    try { await _expireDailyRoulettePct(userId); } catch (_) {} // #305
+    const uPend = await User.findOne({ id: userId }).select('dailyRoulettePendingPct dailyRoulettePendingLabel dailyRouletteWonAt').lean();
     res.json({
       success: true,
       enabled: cfg.enabled,
@@ -19217,6 +19243,8 @@ app.get('/api/roulette/status', authMiddleware, async (req, res) => {
       segments: cfg.prizes.map(p => ({ label: p.label })),
       pendingPct: (uPend && uPend.dailyRoulettePendingPct) || 0,
       pendingLabel: (uPend && uPend.dailyRoulettePendingLabel) || null,
+      pendingExpiresAt: (uPend && uPend.dailyRoulettePendingPct > 0) ? _dailyPctExpiresAt(uPend.dailyRouletteWonAt) : null, // #305
+      pctTtlHours: 24,
       alreadySpun: !cd.canSpin,
       spin: spin ? {
         prizeARS: spin.prizeARS,
@@ -19637,12 +19665,12 @@ app.post('/api/roulette/spin', authMiddleware, async (req, res) => {
         $set: { dailyRoulettePendingPct: pct, dailyRoulettePendingLabel: pick.label, dailyRouletteWonAt: new Date() }
       }).catch(() => {});
       await _emitAdminOnlyChatNote(userId, username,
-        `🎰 Ruleta DIARIA: ganó ${pick.label} (${pct}% EXTRA) para su PRÓXIMA CARGA — PENDIENTE. Se aplica solo en la carga automática o manual SIN bonus; si cargás bonus a mano, se marca usado igual.`);
+        `🎰 Ruleta DIARIA: ganó ${pick.label} (${pct}% EXTRA) para su PRÓXIMA CARGA — PENDIENTE, vence en 24 h. Se aplica solo en la carga automática o manual SIN bonus; si cargás bonus a mano, se marca usado igual.`);
       logger.info(`[ROULETTE] ${username} → ${pct}% EXTRA pendiente (${dateKey})`);
       return res.json({
         success: true,
         prizeIndex,
-        prize: { prizeARS: 0, prizePct: pct, prizeLabel: pick.label, type: 'percent', status: 'percent_pending' }
+        prize: { prizeARS: 0, prizePct: pct, prizeLabel: pick.label, type: 'percent', status: 'percent_pending', expiresAt: new Date(Date.now() + DAILY_PCT_TTL_MS).toISOString(), ttlHours: 24 }
       });
     }
 
@@ -19748,6 +19776,7 @@ app.get('/api/admin/roulette/stats', authMiddleware, adminMiddleware, async (req
           // #303: premios % EXTRA (para la próxima carga): ganados, aplicados y $ que generaron.
           pctWon: { $sum: { $cond: [{ $eq: ['$prizeType', 'percent'] }, 1, 0] } },
           pctUsed: { $sum: { $cond: [{ $eq: ['$status', 'percent_used'] }, 1, 0] } },
+          pctExpired: { $sum: { $cond: [{ $eq: ['$status', 'percent_expired'] }, 1, 0] } },
           pctBonus: { $sum: { $cond: [{ $eq: ['$status', 'percent_used'] }, { $ifNull: ['$usedBonusARS', 0] }, 0] } }
         }},
         { $sort: { _id: -1 } }
@@ -19767,6 +19796,7 @@ app.get('/api/admin/roulette/stats', authMiddleware, adminMiddleware, async (req
           pendingTotal: { $sum: { $cond: [{ $eq: ['$status', 'credit_failed'] }, '$prizeARS', 0] } },
           pctWonTotal: { $sum: { $cond: [{ $eq: ['$prizeType', 'percent'] }, 1, 0] } },
           pctUsedTotal: { $sum: { $cond: [{ $eq: ['$status', 'percent_used'] }, 1, 0] } },
+          pctExpiredTotal: { $sum: { $cond: [{ $eq: ['$status', 'percent_expired'] }, 1, 0] } },
           pctBonusTotal: { $sum: { $cond: [{ $eq: ['$status', 'percent_used'] }, { $ifNull: ['$usedBonusARS', 0] }, 0] } }
         }}
       ])
