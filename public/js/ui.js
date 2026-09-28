@@ -3302,8 +3302,12 @@ VIP.ui.openRewardsHub = function() {
       body = '<div style="font-size:13px;color:#cfd6de;line-height:1.4;">Tu giro <b style="color:#26e07f;">GRATIS de HOY</b> está disponible. Premios en % extra (reclamable por <b>24 h</b> en tu próxima carga) y saldo directo.</div>';
       cta = _rwCta('🎰 GIRAR LA RULETA DE HOY', 'VIP.ui._rwSpinDaily()', true, '#26e07f');
     } else if (dy.needsDeposit) {
-      body = '<div style="font-size:13px;color:#cfd6de;line-height:1.4;">Hacé tu <b>primera carga</b> y desbloqueás un giro gratis <b>todos los días</b>.</div>';
-      cta = _rwCta('💳 Hacer mi primera carga', "VIP.ui.closeRewardsHub();VIP.ui.casinoBotGo('deposit')", true, '#26e07f');
+      // #306: el requisito es tener carga en los últimos N días (no histórica).
+      const _dd = Number(dy.depositDays) || 0;
+      body = '<div style="font-size:13px;color:#cfd6de;line-height:1.4;">' + (_dd > 0
+        ? 'Para girar necesitás <b>una carga en los últimos ' + _dd + ' días</b>. Cargá y desbloqueás un giro gratis <b>todos los días</b>.'
+        : 'Hacé tu <b>primera carga</b> y desbloqueás un giro gratis <b>todos los días</b>.') + '</div>';
+      cta = _rwCta(_dd > 0 ? '💳 Cargar y activar mi giro' : '💳 Hacer mi primera carga', "VIP.ui.closeRewardsHub();VIP.ui.casinoBotGo('deposit')", true, '#26e07f');
     } else if (dy.alreadySpun) {
       const tp = dy.todayPrize || {};
       let st = tp.type === 'percent' ? ('Hoy ganaste <b style="color:#26e07f;">' + _wrEsc(tp.label || '') + '</b>' + (dy.pendingPct > 0 ? ' — se aplica en tu próxima carga · <b style="color:#ffd700;">vence en ' + _rwCountdown(dy.pendingExpiresAt) + '</b> ⏳' : ' — ya aplicado o vencido'))

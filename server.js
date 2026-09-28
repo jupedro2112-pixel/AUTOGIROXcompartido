@@ -12534,7 +12534,8 @@ app.post('/api/admin/daily-roulette', authMiddleware, adminMiddleware, async (re
       });
     }
     const requireDeposits = Math.min(100, Math.max(0, Math.round(Number(body.requireDeposits ?? 1)) || 0));
-    const cfgOut = { enabled: body.enabled === true, requireDeposits, requireAppInstalled: body.requireAppInstalled === true, prizes };
+    const depositDays = Math.min(365, Math.max(0, Math.round(Number(body.depositDays ?? 7)) || 0)); // #306
+    const cfgOut = { enabled: body.enabled === true, requireDeposits, depositDays, requireAppInstalled: body.requireAppInstalled === true, prizes };
     await Config.set('dailyRoulette', cfgOut, req.user.username);
     _dailyRouCfgCache = cfgOut;
     res.json({ success: true, ...cfgOut });
@@ -13150,7 +13151,7 @@ app.get('/api/rewards/summary', authMiddleware, async (req, res) => {
         if (!_rouletteHasAppInstalled(uu)) { dailyEligible = false; needsApp = true; }
       }
       if (dailyEligible) {
-        const dep = await _dailyRouletteDepositsOk(userId, username, dCfg.requireDeposits);
+        const dep = await _dailyRouletteDepositsOk(userId, username, dCfg.requireDeposits, dCfg.depositDays);
         if (!dep.ok) { dailyEligible = false; needsDeposit = true; }
       }
       const cdS = dCfg.enabled ? await _dailyRouletteCooldown(userId) : { canSpin: false, nextSpinAt: null, lastSpin: null };
@@ -13159,6 +13160,8 @@ app.get('/api/rewards/summary', authMiddleware, async (req, res) => {
         enabled: dCfg.enabled,
         eligible: dailyEligible,
         needsDeposit,
+        depositDays: dCfg.depositDays, // #306
+        minDeposits: dCfg.requireDeposits,
         needsApp,
         canSpin: dailyEligible && cdS.canSpin,
         alreadySpun: dCfg.enabled && !cdS.canSpin,
@@ -19069,6 +19072,7 @@ const CashbackClaim = require('./src/models/CashbackClaim');
 const DAILY_ROULETTE_DEFAULT = {
   enabled: false,
   requireDeposits: 1,
+  depositDays: 7, // #306: las cargas se cuentan en los últimos N días (0 = histórico)
   requireAppInstalled: false,
   prizes: [
     { id: 'd10', label: '10% EXTRA', type: 'percent', value: 10, weight: 40, rolloverX: 0 },
@@ -19100,6 +19104,7 @@ async function getDailyRouletteConfig() {
         const cfg = {
           enabled: raw.enabled === true,
           requireDeposits: Math.min(100, Math.max(0, Math.round(Number(raw.requireDeposits)))),
+          depositDays: (raw.depositDays == null) ? 7 : Math.min(365, Math.max(0, Math.round(Number(raw.depositDays)) || 0)), // #306
           requireAppInstalled: raw.requireAppInstalled === true,
           prizes
         };
@@ -19112,16 +19117,22 @@ async function getDailyRouletteConfig() {
   _dailyRouCfgCache = DAILY_ROULETTE_DEFAULT;
   return DAILY_ROULETTE_DEFAULT;
 }
-// ¿Cumple el mínimo de cargas? (cargas reales de toda la vida, sin regalos)
-async function _dailyRouletteDepositsOk(userId, username, minDeposits) {
+// ¿Cumple el mínimo de cargas? Cargas reales (sin regalos) en los últimos
+// `days` días (#306, owner 2026-09-28: "que funcione si tiene una carga aunque
+// sea en la última semana" — antes valía cualquier carga histórica). days=0 →
+// histórico como antes.
+async function _dailyRouletteDepositsOk(userId, username, minDeposits, days) {
   if (!(minDeposits > 0)) return { ok: true, count: null };
   try {
-    const count = await Transaction.countDocuments({
+    const q = {
       $or: [{ userId: userId }, { username: username }],
       type: 'deposit',
       'metadata.source': { $nin: ['install_bonus', 'welcome_gift', 'payout_refund'] }
-    });
-    return { ok: count >= minDeposits, count };
+    };
+    const d = Number(days);
+    if (d > 0) q.timestamp = { $gte: new Date(Date.now() - d * 24 * 3600 * 1000) };
+    const count = await Transaction.countDocuments(q);
+    return { ok: count >= minDeposits, count, days: d > 0 ? d : null };
   } catch (e) {
     logger.warn(`[daily-roulette] chequeo de cargas falló: ${e.message}`);
     return { ok: true, count: null }; // fail-open (no castigar por un error de DB)
@@ -19225,7 +19236,7 @@ app.get('/api/roulette/status', authMiddleware, async (req, res) => {
       const u = await User.findOne({ id: userId }, { fcmTokenContext: 1, fcmTokens: 1 }).lean();
       appOk = _rouletteHasAppInstalled(u);
     }
-    const dep = await _dailyRouletteDepositsOk(userId, username, cfg.requireDeposits);
+    const dep = await _dailyRouletteDepositsOk(userId, username, cfg.requireDeposits, cfg.depositDays);
     const eligible = cfg.enabled && appOk && dep.ok;
     const cd = await _dailyRouletteCooldown(userId);
     const spin = cd.canSpin ? null : cd.lastSpin;
@@ -19238,6 +19249,7 @@ app.get('/api/roulette/status', authMiddleware, async (req, res) => {
       needsAppNotifs: !appOk,
       needsDeposit: appOk && !dep.ok,
       minDeposits: cfg.requireDeposits,
+      depositDays: cfg.depositDays, // #306
       dateKey,
       nextResetAt: cd.canSpin ? null : cd.nextSpinAt,
       segments: cfg.prizes.map(p => ({ label: p.label })),
@@ -19549,12 +19561,13 @@ app.post('/api/roulette/spin', authMiddleware, async (req, res) => {
         });
       }
     }
-    const dep = await _dailyRouletteDepositsOk(userId, username, cfg.requireDeposits);
+    const dep = await _dailyRouletteDepositsOk(userId, username, cfg.requireDeposits, cfg.depositDays);
     if (!dep.ok) {
       return res.status(403).json({
         error: `La ruleta diaria es para clientes: hacé tu primera carga y girás gratis todos los días.`,
         needsDeposit: true,
-        minDeposits: cfg.requireDeposits
+        minDeposits: cfg.requireDeposits,
+        depositDays: cfg.depositDays
       });
     }
 

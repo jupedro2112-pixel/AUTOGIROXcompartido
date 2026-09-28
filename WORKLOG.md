@@ -8,6 +8,14 @@
 
 ## Sesión 2026-09-28
 
+### 306. Ruleta diaria: las cargas mínimas se cuentan en los últimos N días (default 7)
+- Owner: "que funcione si tiene una carga aunque sea en la última semana mínimo; ahora es
+  1 carga histórica". `_dailyRouletteDepositsOk(userId, username, min, days)` cuenta las
+  cargas reales con `timestamp ≥ ahora − days` (0 = histórico como antes). Config
+  `dailyRoulette.depositDays` (default 7, 0-365) en la card de la ruleta del panel
+  ("…en los últimos N días", admin-sw v64). Summary/status devuelven `depositDays`; el
+  hub (SW v184) dice "Para girar necesitás una carga en los últimos 7 días".
+
 ### 305. Ruleta diaria: el % EXTRA vence a las 24 h del giro (y se avisa)
 - Owner: "todo lo que sea bono en ruleta diaria que sea 24 h para reclamar y que aclare que
   es reclamable por 24 h". Los premios en SALDO no cambian (se acreditan al girar).

@@ -6729,6 +6729,8 @@ async function loadDailyRouletteCfg() {
         if (en) en.checked = cfg.enabled === true;
         const md = document.getElementById('drMinDeposits');
         if (md) md.value = (cfg.requireDeposits != null ? cfg.requireDeposits : 1);
+        const dd = document.getElementById('drDepositDays'); // #306
+        if (dd) dd.value = (cfg.depositDays != null ? cfg.depositDays : 7);
         const ra = document.getElementById('drRequireApp');
         if (ra) ra.checked = cfg.requireAppInstalled === true;
         const list = document.getElementById('drPrizesList');
@@ -6793,6 +6795,7 @@ async function saveDailyRoulette() {
             body: JSON.stringify({
                 enabled: document.getElementById('drEnabled').checked,
                 requireDeposits: Number(document.getElementById('drMinDeposits').value) || 0,
+                depositDays: Number((document.getElementById('drDepositDays') || {}).value) || 0, // #306
                 requireAppInstalled: document.getElementById('drRequireApp').checked,
                 prizes: prizes
             })
