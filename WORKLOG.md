@@ -8,6 +8,21 @@
 
 ## Sesión 2026-09-28
 
+### 308. Referidos visibles para el cliente: tarjeta "🤝 Invitá y ganá" en PREMIOS + banner en el inicio
+- Owner: "dónde recomendás que aparezca, que se explique e incentive, en segundo plano
+  pero que llame la atención". Elegido: (1) **tarjeta al final del hub PREMIOS** (antes de
+  INFORMACIÓN, acento naranja): explicación ("cobrás el X% de lo que pierdan tus
+  referidos, todos los meses, sin límite"), link + código en un recuadro, botones
+  **📋 Copiar link** y **💬 Compartir por WhatsApp** (`navigator.share` o wa.me),
+  stats REFERIDOS / COBRADO / ESTE MES y "se paga solo el 1 de cada mes · último pago".
+  (2) **Banner compacto en el inicio del asistente** ("Invitá amigos y ganá el X%… tocá
+  para ver tu link") que abre el hub con scroll a la tarjeta (`openRewardsHub('ref')`).
+  (3) Tema "🤝 CÓMO FUNCIONAN LOS REFERIDOS" en INFORMACIÓN.
+- Datos: `/api/referrals/me` + `/api/referrals/summary` cacheados en `VIP.ui._rwRef`
+  (`_rwLoadReferrals`, se piden la primera vez y se re-pinta el hub). El % sale de
+  `/api/rewards/summary.referralPct` (= `/sys_referidos_pct`, #307). SW → v185. El modal
+  viejo "Mis Referidos" del dashboard queda como estaba.
+
 ### 307. Referidos: pago AUTOMÁTICO el 1 de cada mes + comisión 3% editable desde COMANDOS
 - Owner: "cada mes automáticamente el pago, siempre el 1; que quede el registro en
   Referidos; bajar de 8 a 3% y modificable desde comandos".

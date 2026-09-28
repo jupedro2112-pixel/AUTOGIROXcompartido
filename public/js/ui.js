@@ -2335,6 +2335,13 @@ VIP.ui.casinoBotGo = function(state) {
     // #295: modo de carga elegido + cambiar (solo si ya eligió; si no, la
     // elección aparece al tocar Depositar).
     if (VIP.ui._depositMode()) VIP.ui._botMsg(VIP.ui._depositModeChip());
+    // #308: banner chico de referidos (segundo plano, pero que se vea): abre el
+    // hub PREMIOS en la tarjeta "Invitá y ganá".
+    const _rb = VIP.ui._botMsg('<div onclick="VIP.ui.openRewardsHub(\'ref\')" style="display:flex;align-items:center;gap:9px;cursor:pointer;">' +
+      '<span style="font-size:22px;flex:none;">🤝</span>' +
+      '<div style="flex:1;min-width:0;line-height:1.3;"><b style="color:#ff9800;">Invitá amigos y ganá el ' + VIP.ui._rwRefPct() + '%</b> de lo que pierdan jugando, todos los meses.' +
+      '<div style="font-size:11px;opacity:.8;">Tocá para ver tu link y compartirlo 👉</div></div></div>');
+    if (_rb) { _rb.style.border = '1px solid rgba(255,152,0,0.55)'; _rb.style.background = 'linear-gradient(135deg,rgba(255,152,0,0.12),rgba(255,152,0,0.04))'; }
     // (owner 2026-09-02: se SACÓ del asistente el "Estás como X" + botón
     // "Cambiar de cuenta / Salir" de #252 — no quiere que el cliente pueda
     // cerrar sesión desde el widget. VIP.ui.casinoLogout queda definido por si
@@ -3255,7 +3262,97 @@ function _rwCta(label, onclick, enabled, accent) {
     'border-radius:13px;padding:12px;font-size:13px;font-weight:700;">' + label + '</div>';
 }
 
-VIP.ui.openRewardsHub = function() {
+// ============================================================
+// #308: REFERIDOS en el hub PREMIOS (owner 2026-09-28: "que se le explique,
+// incentivar, en segundo plano pero que llame la atención"). Tarjeta al final de
+// los premios (antes de INFORMACIÓN) con link para compartir + WhatsApp, cuánto
+// gana, referidos activos y último pago. Datos de /api/referrals/me + /summary,
+// cacheados en VIP.ui._rwRef (se piden la primera vez y se re-pinta el hub).
+// ============================================================
+VIP.ui._rwLoadReferrals = function() {
+  if (VIP.ui._rwRefFetching) return;
+  VIP.ui._rwRefFetching = true;
+  const h = { 'Authorization': `Bearer ${VIP.state.currentToken}` };
+  Promise.all([
+    fetch(`${VIP.config.API_URL}/api/referrals/me`, { headers: h }).then(function(r) { return r.ok ? r.json() : null; }),
+    fetch(`${VIP.config.API_URL}/api/referrals/summary`, { headers: h }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
+  ]).then(function(res) {
+    VIP.ui._rwRefFetching = false;
+    VIP.ui._rwRef = { me: (res[0] && res[0].data) || null, sum: (res[1] && res[1].data) || null, at: Date.now() };
+    if (document.getElementById('rwHubOverlay')) {
+      const ovh = document.getElementById('rwHubOverlay'); const stp = ovh ? ovh.scrollTop : 0;
+      try { VIP.ui.openRewardsHub(); } catch (e) {}
+      const ov2 = document.getElementById('rwHubOverlay'); if (ov2) ov2.scrollTop = stp;
+    }
+  }).catch(function() { VIP.ui._rwRefFetching = false; VIP.ui._rwRef = { me: null, sum: null, err: true, at: Date.now() }; });
+};
+VIP.ui._rwRefPct = function() {
+  const p = VIP.ui._rwSummary && Number(VIP.ui._rwSummary.referralPct);
+  return (p > 0) ? p : 3;
+};
+VIP.ui._rwRefShareText = function() {
+  const me = (VIP.ui._rwRef && VIP.ui._rwRef.me) || {};
+  return '🎰 Sumate a la sala con mi link y jugá con cargas automáticas en segundos 👉 ' + (me.referralLink || '');
+};
+VIP.ui._rwCopyRef = function() {
+  const me = (VIP.ui._rwRef && VIP.ui._rwRef.me) || {};
+  const val = me.referralLink || me.referralCode || '';
+  if (!val) return;
+  const ok = function() { VIP.ui.showToast('✅ Link copiado — compartilo con tus amigos', 'success'); };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(val).then(ok, function() { window.prompt('Copialo manualmente:', val); }); return; }
+  } catch (e) {}
+  window.prompt('Copialo manualmente:', val);
+};
+VIP.ui._rwShareRef = function() {
+  const txt = VIP.ui._rwRefShareText();
+  try {
+    if (navigator.share) { navigator.share({ text: txt }).catch(function() {}); return; }
+  } catch (e) {}
+  window.open('https://wa.me/?text=' + encodeURIComponent(txt), '_blank');
+};
+VIP.ui._rwReferralCard = function() {
+  const pct = VIP.ui._rwRefPct();
+  const acc = '#ff9800';
+  const ref = VIP.ui._rwRef;
+  if (!ref) { VIP.ui._rwLoadReferrals(); }
+  const me = (ref && ref.me) || null, sum = (ref && ref.sum) || null;
+  const head = '<div style="font-size:13.5px;color:#fff;line-height:1.45;margin-bottom:8px;">Compartí tu link: cada amigo que se registre con él es <b>tu referido</b>, y vos cobrás ' +
+    '<b style="color:' + acc + ';">el ' + pct + '% de lo que pierdan jugando</b>, <b>todos los meses</b>, directo a tu saldo. Sin límite de amigos. 🚀</div>';
+  let body;
+  if (!ref) {
+    body = head + '<div style="font-size:12.5px;color:#9aa4b0;">⏳ Cargando tu link…</div>';
+  } else if (!me) {
+    body = head + '<div style="font-size:12.5px;color:#cfd6de;">No pudimos traer tu link ahora. <span onclick="VIP.ui._rwRef=null;VIP.ui._rwLoadReferrals()" style="color:' + acc + ';font-weight:800;cursor:pointer;">Reintentar</span></div>';
+  } else {
+    const link = me.referralLink || '';
+    const activos = me.activeReferred != null ? me.activeReferred : (me.totalReferred || 0);
+    const cobrado = Math.round(me.historicalTotalCredited || 0);
+    const estim = sum ? Math.round(sum.pendingEstimatedAmount || 0) : 0;
+    const stat = function(lbl, val, color) {
+      return '<div style="flex:1;min-width:80px;background:rgba(255,255,255,0.05);border-radius:10px;padding:7px 8px;text-align:center;">' +
+        '<div style="font-size:10px;color:#9aa4b0;letter-spacing:.3px;">' + lbl + '</div><div style="font-size:15px;font-weight:900;color:' + (color || '#fff') + ';">' + val + '</div></div>';
+    };
+    body = head +
+      '<div style="background:rgba(0,0,0,0.30);border:1px dashed ' + acc + '88;border-radius:12px;padding:9px 10px;margin-bottom:8px;">' +
+        '<div style="font-size:10px;color:#9aa4b0;letter-spacing:.5px;margin-bottom:3px;">TU LINK DE INVITACIÓN · código <b style="color:#fff;">' + _wrEsc(me.referralCode || '—') + '</b></div>' +
+        '<div style="font-size:12px;color:#fff;word-break:break-all;font-family:monospace;">' + _wrEsc(link || '—') + '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:10px;">' +
+        '<button type="button" onclick="VIP.ui._rwCopyRef()" style="flex:1;border:none;cursor:pointer;background:rgba(255,255,255,0.10);color:#fff;border-radius:11px;padding:11px;font-size:13px;font-weight:800;">📋 Copiar link</button>' +
+        '<button type="button" onclick="VIP.ui._rwShareRef()" style="flex:1.2;border:none;cursor:pointer;background:linear-gradient(135deg,#25d366,#128c4a);color:#fff;border-radius:11px;padding:11px;font-size:13px;font-weight:900;box-shadow:0 6px 16px rgba(37,211,102,0.3);">💬 Compartir por WhatsApp</button>' +
+      '</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        stat('REFERIDOS', activos, activos > 0 ? '#26e07f' : '#fff') +
+        stat('COBRADO', _rwFmt(cobrado), cobrado > 0 ? acc : '#fff') +
+        stat('ESTE MES', _rwFmt(estim), estim > 0 ? acc : '#fff') +
+      '</div>' +
+      '<div style="font-size:11px;color:#9aa4b0;margin-top:8px;text-align:center;">💸 Se paga solo el <b style="color:#fff;">1 de cada mes</b>' + (sum && sum.lastPayout && sum.lastPayout.amount > 0 ? ' · último pago <b style="color:#fff;">' + _rwFmt(sum.lastPayout.amount) + '</b>' : '') + '</div>';
+  }
+  return '<div id="rwRefCard">' + _rwCard({ icon: '🤝', accent: acc, title: 'Invitá y ganá', subtitle: 'El ' + pct + '% de lo que pierdan tus referidos, cada mes', body: body, cta: '' }) + '</div>';
+};
+
+VIP.ui.openRewardsHub = function(focus) {
   VIP.ui.closeRewardsHub(true);
   const d = VIP.ui._rwSummary || {};
   const w = d.welcome || {}, dy = d.daily || {}, cb = d.cashback || {};
@@ -3375,6 +3472,9 @@ VIP.ui.openRewardsHub = function() {
     cards += _rwCard({ icon: '💸', accent: '#4dd0ff', title: cb.enabled ? 'Tu Reembolso' : 'Tus Reembolsos', subtitle: cb.enabled ? ('El ' + (cb.pct || 0) + '% de lo que perdés vuelve a tu saldo') : 'Diario, semanal y mensual — sobre lo que perdés jugando', body: body, cta: cta });
   }
 
+  // --- 🤝 REFERIDOS (#308): segundo plano (al final de los premios) pero visible.
+  try { cards += VIP.ui._rwReferralCard(); } catch (e) {}
+
   // --- ℹ️ SECCIÓN INFORMACIÓN (#257d): reembolso + rollover explicado todo
   // junto, con los VALORES REALES del panel (pct / mínimo / tope / rollover). ---
   {
@@ -3432,6 +3532,11 @@ VIP.ui.openRewardsHub = function() {
       sec('reembolso', '#4dd0ff', '💸 CÓMO FUNCIONA TU REEMBOLSO', secReembolso) +
       sec('rollover', '#ffd700', '🔒 ¿QUÉ ES EL ROLLOVER?', secRollover) +
       (secBonos ? sec('bonos', '#26e07f', '🎁 CÓMO FUNCIONAN LOS BONOS', secBonos) : '') +
+      sec('referidos', '#ff9800', '🤝 CÓMO FUNCIONAN LOS REFERIDOS',
+        li('🔗', 'Compartí <b style="color:#fff;">tu link</b> (está en la tarjeta "Invitá y ganá"). El que se registra con él queda como <b style="color:#fff;">tu referido</b> para siempre.') +
+        li('💰', 'Cada mes cobrás el <b style="color:#ff9800;">' + VIP.ui._rwRefPct() + '%</b> de lo que tus referidos <b style="color:#fff;">pierdan jugando</b> (slots y casino). Cuantos más amigos, más cobrás — sin tope.') +
+        li('📅', 'Se acredita <b style="color:#fff;">solo, el 1 de cada mes</b>, directo a tu saldo y sin rollover: lo podés jugar o retirar al instante.') +
+        li('📊', 'En la tarjeta ves tus referidos activos, lo que ya cobraste y lo estimado del mes en curso.')) +
     '</div>';
   }
 
@@ -3456,6 +3561,8 @@ VIP.ui.openRewardsHub = function() {
       '<div style="display:flex;flex-direction:column;gap:14px;">' + cards + '</div>' +
     '</div>';
   document.body.appendChild(ov);
+  // #308: abierto desde el banner "Invitá y ganá" → scroll a la tarjeta de referidos.
+  if (focus === 'ref') { try { const c = document.getElementById('rwRefCard'); if (c) c.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) {} }
   // Arrancar el polling solo si no está corriendo (el re-render del propio
   // polling vuelve a pasar por acá y no debe reiniciar el timer ni re-pedir).
   if (!VIP.ui._rwPollTimer) VIP.ui._rwStartPolling();

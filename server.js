@@ -13177,6 +13177,8 @@ app.get('/api/rewards/summary', authMiddleware, async (req, res) => {
     try {
       const _dm = await User.findOne({ id: userId }).select('depositMode').lean();
       out.depositMode = (_dm && _dm.depositMode) || null;
+      // #308: % de comisión de referidos vigente (comando /sys_referidos_pct) para el hub.
+      try { out.referralPct = Math.round((await require('./src/utils/referralRate').resolveReferralRate()) * 1000) / 10; } catch (e) { out.referralPct = 3; }
     } catch (e) { out.depositMode = null; }
 
     // Bienvenida
