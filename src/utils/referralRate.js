@@ -22,7 +22,11 @@
  */
 
 /** Tasa por defecto, en decimal. 0.08 = 8% del netwin del referido. */
-const DEFAULT_REFERRAL_RATE = 0.08;
+// #307 (owner 2026-09-28): baja de 8% a 3%. El valor VIVO se lee del comando
+// /sys_referidos_pct (sección COMANDOS del panel) vía resolveReferralRate().
+const DEFAULT_REFERRAL_RATE = 0.03;
+const REFERRAL_PCT_COMMAND = '/sys_referidos_pct';
+let _cmdRate = null; // último % leído del comando (decimal), lo fija resolveReferralRate()
 
 /**
  * Tasa configurada por entorno, en decimal.
@@ -32,6 +36,7 @@ const DEFAULT_REFERRAL_RATE = 0.08;
  * patrón que `hgcashService.getToken()`).
  */
 function getConfiguredRate() {
+  if (_cmdRate != null) return _cmdRate; // #307: el comando manda
   const pct = Number(process.env.GIROX_REFERRAL_COMMISSION_PCT);
   // Sanea basura (NaN, negativos, >100) cayendo al default acordado: un porcentaje
   // inválido nunca debe traducirse en pagar de más ni en no pagar nada.
@@ -55,8 +60,26 @@ function getReferralRateForUser(user) {
   return getConfiguredRate();
 }
 
+/**
+ * #307: lee el % del comando /sys_referidos_pct (texto = solo el número, ej. "3"
+ * o "3%"). Válido 0 < pct ≤ 100. Si el comando no existe, está vacío o es
+ * inválido → env / default. Llamar ANTES de un cálculo (async).
+ */
+async function resolveReferralRate() {
+  try {
+    const { Command } = require('../models');
+    const cmd = await Command.findOne({ name: REFERRAL_PCT_COMMAND, isActive: true }).lean();
+    const m = cmd && cmd.response ? String(cmd.response).replace(',', '.').match(/\d+(\.\d+)?/) : null;
+    const pct = m ? Number(m[0]) : NaN;
+    _cmdRate = (Number.isFinite(pct) && pct > 0 && pct <= 100) ? pct / 100 : null;
+  } catch (_) { _cmdRate = null; }
+  return getConfiguredRate();
+}
+
 module.exports = {
   DEFAULT_REFERRAL_RATE,
+  REFERRAL_PCT_COMMAND,
   getConfiguredRate,
-  getReferralRateForUser
+  getReferralRateForUser,
+  resolveReferralRate
 };

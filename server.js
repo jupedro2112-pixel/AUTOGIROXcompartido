@@ -633,6 +633,58 @@ async function _expireDailyRoulettePct(userId) {
 }
 setInterval(() => { _expireDailyRoulettePct(null).catch((e) => logger.warn(`[ROULETTE] cron vencimiento % falló: ${e.message}`)); }, 15 * 60 * 1000);
 
+// ============================================================
+// #307 (owner 2026-09-28): PAGO AUTOMÁTICO DE REFERIDOS el día 1 de cada mes
+// (hora argentina) por el mes ANTERIOR: Calcular → Pagar, igual que los botones
+// del panel (queda en Referidos → pagos con adminUsername 'auto-referidos' y
+// Transaction referral_commission). Idempotente multi-instancia: la corrida se
+// reserva con un Config `referral_autorun_<YYYY-MM>` creado atómicamente
+// ($setOnInsert + upsert); la instancia que lo crea es la que corre. Si el
+// server estaba caído el día 1, corre en cuanto vuelve (cualquier día del mes)
+// y solo paga la diferencia no pagada (el servicio es incremental).
+// ============================================================
+function _referralPrevPeriodKeyART() {
+  const [y, m] = _rouletteDateKeyART().split('-').map(Number);
+  const py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1;
+  return `${py}-${String(pm).padStart(2, '0')}`;
+}
+async function _runMonthlyReferralPayout() {
+  const periodKey = _referralPrevPeriodKeyART();
+  const key = `referral_autorun_${periodKey}`;
+  let claimed = false;
+  try {
+    const r = await Config.findOneAndUpdate(
+      { key },
+      { $setOnInsert: { key, value: { startedAt: new Date(), status: 'running' }, updatedBy: 'auto-referidos' } },
+      { upsert: true, new: false, rawResult: true }
+    );
+    claimed = !!(r && r.lastErrorObject && r.lastErrorObject.upserted);
+  } catch (e) {
+    if (e && e.code === 11000) claimed = false; else throw e;
+  }
+  if (!claimed) return;
+  logger.info(`[referidos] pago AUTOMÁTICO del período ${periodKey}: calculando…`);
+  const out = { periodKey, startedAt: new Date(), status: 'running' };
+  try {
+    const calc = await referralCalculationService.calculateCommissionsForPeriod(periodKey, { dryRun: false });
+    out.calc = { referrers: calc && calc.referrersProcessed, referreds: calc && calc.referredsProcessed, commissions: calc && calc.commissionsCreated, errors: calc && calc.errors ? calc.errors.length : 0 };
+    const pay = await referralPayoutService.executePayoutsForPeriod(periodKey, { adminId: 'system', adminUsername: 'auto-referidos' });
+    out.pay = { created: pay.payoutsCreated, failed: pay.payoutsFailed, skipped: pay.payoutsSkipped,
+      total: (pay.details || []).reduce((a, d) => a + (Number(d && (d.totalCommissionAmount || d.amount)) || 0), 0) };
+    out.status = pay.payoutsFailed > 0 ? (pay.payoutsCreated > 0 ? 'partial' : 'failed') : 'done';
+    logger.info(`[referidos] pago AUTOMÁTICO ${periodKey}: pagos=${pay.payoutsCreated} fallidos=${pay.payoutsFailed} salteados=${pay.payoutsSkipped}`);
+  } catch (e) {
+    out.status = 'error'; out.error = String(e && e.message || e).slice(0, 300);
+    logger.error(`[referidos] pago AUTOMÁTICO ${periodKey} falló: ${out.error}`);
+  }
+  out.finishedAt = new Date();
+  await Config.updateOne({ key }, { $set: { value: out } }).catch(() => {});
+}
+const referralCalculationService = require('./src/services/referralCalculationService');
+const referralPayoutService = require('./src/services/referralPayoutService');
+setTimeout(() => { _runMonthlyReferralPayout().catch((e) => logger.warn(`[referidos] cron mensual falló: ${e.message}`)); }, 5 * 60 * 1000); // 5 min tras el arranque
+setInterval(() => { _runMonthlyReferralPayout().catch((e) => logger.warn(`[referidos] cron mensual falló: ${e.message}`)); }, 60 * 60 * 1000); // cada hora (solo hace algo si falta el mes anterior)
+
 async function claimDailyRoulettePercent(userId, usedBy) {
   try {
     try { await _expireDailyRoulettePct(userId); } catch (_) {} // #305: si venció, no se aplica
@@ -11447,6 +11499,12 @@ async function initializeData() {
       description: 'Mensaje automático cuando el cliente abre el SOPORTE del widget del casino (máx. 1 vez cada 6hs por cliente). Si lo dejás vacío, no se envía.',
       type: 'message',
       response: '👋 ¡Bienvenido al SOPORTE de 1Girox!\n\nContanos tu consulta y te damos una solución al toque. 🎧'
+    },
+    {
+      name: '/sys_referidos_pct',
+      description: 'PORCENTAJE de comisión de referidos: solo el número (ej. 3 = el referidor cobra el 3% de lo que pierde su referido en el mes). Lo usa el pago AUTOMÁTICO del día 1 de cada mes y los botones Calcular/Pagar de Referidos. Vacío o inválido = 3%.',
+      type: 'message',
+      response: '3'
     },
     {
       name: '/sys_carga_manual',

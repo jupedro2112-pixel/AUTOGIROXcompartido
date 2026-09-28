@@ -123,6 +123,9 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   `PUBLISHER_ADMIN_ALLOWED_PATHS`).
 - **Auth:** JWT por header Authorization O por cookie httpOnly `admin_api_session`
   (el panel admin usa cookie).
+- **Referidos (#307):** comisión = `/sys_referidos_pct` % (COMANDOS, default 3) del netwin
+  del referido; pago automático el día 1 (cron `_runMonthlyReferralPayout`, reserva
+  `Config referral_autorun_<YYYY-MM>`). No reintroducir la tasa encadenada del 7%.
 - **Mensajes automáticos al usuario** son editables desde la sección COMANDOS
   (comandos `/sys_*`). Usar el helper `renderSystemCommand(name, fallback, vars)` para
   cualquier mensaje automático nuevo.

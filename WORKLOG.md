@@ -8,6 +8,25 @@
 
 ## Sesión 2026-09-28
 
+### 307. Referidos: pago AUTOMÁTICO el 1 de cada mes + comisión 3% editable desde COMANDOS
+- Owner: "cada mes automáticamente el pago, siempre el 1; que quede el registro en
+  Referidos; bajar de 8 a 3% y modificable desde comandos".
+- **%**: `DEFAULT_REFERRAL_RATE` 0.08 → **0.03**. Comando nuevo `/sys_referidos_pct`
+  (COMANDOS; texto = solo el número, ej. `3`). `referralRate.resolveReferralRate()` lo
+  lee antes de cada cálculo (`calculateCommissionsForPeriod`) y `getConfiguredRate()`
+  lo prioriza sobre el env `GIROX_REFERRAL_COMMISSION_PCT` y el default. Vacío/inválido
+  → env/3%. Los `referralRateOverride` por usuario siguen mandando.
+- **Cron mensual** (`_runMonthlyReferralPayout`, server.js): cada hora (y 5 min tras el
+  arranque) mira si el mes ANTERIOR (hora ART) ya se corrió; si no, reserva la corrida
+  con un Config `referral_autorun_<YYYY-MM>` creado atómicamente (`$setOnInsert` +
+  upsert → solo una instancia corre) y hace Calcular → Pagar con
+  `adminUsername:'auto-referidos'`. Resultado guardado en ese Config (`status`, `calc`,
+  `pay`). Como el servicio es incremental, si se pagó a mano antes solo paga la
+  diferencia; si el server estaba caído el día 1, corre al volver.
+- ⚠️ Al desplegar, a los 5 min paga el mes anterior (agosto/septiembre según la fecha)
+  si tenía comisiones sin pagar. Los botones Preview/Calcular/Pagar del panel siguen
+  funcionando para casos puntuales.
+
 ### 306. Ruleta diaria: las cargas mínimas se cuentan en los últimos N días (default 7)
 - Owner: "que funcione si tiene una carga aunque sea en la última semana mínimo; ahora es
   1 carga histórica". `_dailyRouletteDepositsOk(userId, username, min, days)` cuenta las

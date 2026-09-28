@@ -41,8 +41,9 @@ El sistema VIPCARGAS:
   automático por hgcash).
 - Da **reembolsos** sobre la pérdida real/NETWIN (diario/semanal/mensual — el diario
   volvió el 2026-09-24, #297), **ruleta
-  diaria**, **fueguito** (racha), **bono instalación $5.000**, **referidos** (8% de
-  netwin → owner-revenue, y 7% de eso al referidor) y **campañas/publicistas** con
+  diaria**, **fueguito** (racha), **bono instalación $5.000**, **referidos** (3% del
+  netwin del referido al referidor — comando `/sys_referidos_pct`; pago automático el
+  1 de cada mes, #307) y **campañas/publicistas** con
   sub-atribución por influencer.
 - El "saldo real" del jugador vive en 1girox; VIPCARGAS guarda atribución, bonos,
   reclamos y el registro permanente de transacciones.

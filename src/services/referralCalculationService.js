@@ -20,7 +20,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { User, ReferralCommission, ReferralPayout } = require('../models');
 const giroxService = require('./giroxService');
-const { getReferralRateForUser, getConfiguredRate } = require('../utils/referralRate');
+const { getReferralRateForUser, getConfiguredRate, resolveReferralRate } = require('../utils/referralRate');
 const { getPeriodRange } = require('../utils/periodKey');
 const logger = require('../utils/logger');
 
@@ -357,6 +357,7 @@ async function calculateCommissionsForPeriod(periodKey, options = {}) {
   // mes). Se mantiene el mismo comportamiento que antes para no mover la base de
   // cálculo sin verificarlo; si se corrige, corregir también los reembolsos.
   const { fromDate, toDate } = getPeriodRange(periodKey);
+  await resolveReferralRate(); // #307: % vivo desde COMANDOS (/sys_referidos_pct)
   const usersNeedingRevenue = referredUsers.filter(u => !u.excludedFromReferral);
   const prefetch = await fetchRevenuesForUsers(usersNeedingRevenue, periodKey, fromDate, toDate);
   const revenueByReferredId = prefetch.revenueByUserId;
