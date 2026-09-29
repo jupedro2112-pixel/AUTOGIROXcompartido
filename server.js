@@ -11507,6 +11507,12 @@ async function initializeData() {
       response: '3'
     },
     {
+      name: '/sys_referidos_compartir',
+      description: 'Mensaje que se comparte por WhatsApp desde la tarjeta "Invitá y ganá" (PREMIOS). Variables: {link} (link de invitación del cliente), {codigo}, {pct} (% de comisión), {username}. Si lo dejás vacío se usa el texto por defecto.',
+      type: 'message',
+      response: '🎰 Sumate a la sala con mi link y jugá con cargas automáticas en segundos 👉 {link}'
+    },
+    {
       name: '/sys_carga_manual',
       description: 'Mensaje automático cuando el cliente elige CARGA MANUAL (con un agente por chat) y abre el chat para cargar (máx. 1 vez cada 2hs por cliente). Si lo dejás vacío, no se envía.',
       type: 'message',
@@ -13179,6 +13185,13 @@ app.get('/api/rewards/summary', authMiddleware, async (req, res) => {
       out.depositMode = (_dm && _dm.depositMode) || null;
       // #308: % de comisión de referidos vigente (comando /sys_referidos_pct) para el hub.
       try { out.referralPct = Math.round((await require('./src/utils/referralRate').resolveReferralRate()) * 1000) / 10; } catch (e) { out.referralPct = 3; }
+      // #308b: plantilla del mensaje de WhatsApp (COMANDOS /sys_referidos_compartir);
+      // el front reemplaza {link}/{codigo} con los datos de /api/referrals/me.
+      try {
+        out.referralShareTpl = await renderSystemCommand('/sys_referidos_compartir',
+          '🎰 Sumate a la sala con mi link y jugá con cargas automáticas en segundos 👉 {link}',
+          { username, pct: out.referralPct, link: '{link}', codigo: '{codigo}' });
+      } catch (e) { out.referralShareTpl = null; }
     } catch (e) { out.depositMode = null; }
 
     // Bienvenida

@@ -3292,7 +3292,11 @@ VIP.ui._rwRefPct = function() {
 };
 VIP.ui._rwRefShareText = function() {
   const me = (VIP.ui._rwRef && VIP.ui._rwRef.me) || {};
-  return '🎰 Sumate a la sala con mi link y jugá con cargas automáticas en segundos 👉 ' + (me.referralLink || '');
+  // #308b: plantilla editable en COMANDOS (/sys_referidos_compartir) vía el summary.
+  let tpl = (VIP.ui._rwSummary && VIP.ui._rwSummary.referralShareTpl) || '🎰 Sumate a la sala con mi link y jugá con cargas automáticas en segundos 👉 {link}';
+  tpl = String(tpl).replace(/\{link\}/g, me.referralLink || '').replace(/\{codigo\}/g, me.referralCode || '').replace(/\{pct\}/g, String(VIP.ui._rwRefPct()));
+  if (me.referralLink && tpl.indexOf(me.referralLink) === -1) tpl += ' ' + me.referralLink; // que nunca salga sin el link
+  return tpl;
 };
 VIP.ui._rwCopyRef = function() {
   const me = (VIP.ui._rwRef && VIP.ui._rwRef.me) || {};

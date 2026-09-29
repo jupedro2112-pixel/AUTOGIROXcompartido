@@ -6,6 +6,15 @@
 >
 > **Última actualización: 2026-09-24**
 
+## Sesión 2026-09-29
+
+### 308b. Mensaje de "Compartir por WhatsApp" (referidos) editable desde COMANDOS
+- Comando nuevo **`/sys_referidos_compartir`** con variables `{link}`, `{codigo}`, `{pct}`,
+  `{username}`. `/api/rewards/summary` devuelve `referralShareTpl` (renderizado con
+  `renderSystemCommand`, dejando `{link}`/`{codigo}` para que el front los complete con
+  `/api/referrals/me`). Si el texto no incluye el link, el front lo agrega al final.
+  Vacío → texto por defecto. SW → v186.
+
 ## Sesión 2026-09-28
 
 ### 308. Referidos visibles para el cliente: tarjeta "🤝 Invitá y ganá" en PREMIOS + banner en el inicio
