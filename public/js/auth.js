@@ -600,6 +600,38 @@ VIP.auth = (function () {
     // automáticamente. El link muere al canjearse (single use, lo garantiza el
     // backend) y el usuario queda con mustChangePassword → verifyToken() le abre
     // el recuadro de crear su contraseña nueva (flujo existente).
+    // #309: usuario de un JWT (sin verificar firma: solo para mostrar el nombre;
+    // el server valida de verdad en /access-link/discard).
+    function _decodeJwtUser(tok) {
+        try {
+            if (!tok || tok.split('.').length !== 3) return null;
+            const p = JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+            if (p.exp && p.exp * 1000 < Date.now()) return null;
+            return p;
+        } catch (e) { return null; }
+    }
+    // #309: cartel de elección (encima de todo, incluso del splash del casino).
+    function _askKeepOldAccount(oldUsername) {
+        return new Promise(function (resolve) {
+            const ov = document.createElement('div');
+            ov.id = 'keepAccountOverlay';
+            ov.style.cssText = 'position:fixed;inset:0;z-index:2147483600;background:rgba(5,8,16,0.96);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
+            ov.innerHTML =
+                '<div style="width:100%;max-width:380px;background:linear-gradient(165deg,#10182f,#0b1022);border:1px solid rgba(212,175,55,0.45);border-radius:18px;padding:20px 16px;color:#fff;box-shadow:0 20px 50px rgba(0,0,0,0.6);">' +
+                  '<div style="font-size:34px;text-align:center;">👤</div>' +
+                  '<div style="font-size:18px;font-weight:900;text-align:center;margin:6px 0 4px;">Ya tenés una cuenta en este celular</div>' +
+                  '<div style="font-size:13.5px;color:#cfd6de;text-align:center;line-height:1.45;margin-bottom:14px;">Estás entrando por un link que te crea una cuenta <b>nueva</b>, pero acá ya estabas con <b style="color:#ffd700;">' + String(oldUsername).replace(/[<>&]/g, '') + '</b> (con tu saldo, tus premios y tu historial). ¿Con cuál querés seguir?</div>' +
+                  '<button type="button" id="keepOldBtn" style="width:100%;border:none;cursor:pointer;background:linear-gradient(135deg,#f7e08a,#d4af37 50%,#b8860b);color:#1a1200;border-radius:14px;padding:14px;font-size:15px;font-weight:900;margin-bottom:8px;">✅ Seguir con ' + String(oldUsername).replace(/[<>&]/g, '') + ' (recomendado)</button>' +
+                  '<button type="button" id="useNewBtn" style="width:100%;cursor:pointer;background:rgba(255,255,255,0.06);color:#cfd6de;border:1px solid rgba(255,255,255,0.14);border-radius:14px;padding:12px;font-size:13.5px;font-weight:800;">Entrar con la cuenta nueva</button>' +
+                  '<div style="font-size:11px;color:#8a97a8;text-align:center;margin-top:10px;">Si elegís la nueva, la anterior sigue existiendo: podés volver a entrar con tu usuario y clave.</div>' +
+                '</div>';
+            document.body.appendChild(ov);
+            const done = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
+            ov.querySelector('#keepOldBtn').onclick = function () { done(true); };
+            ov.querySelector('#useNewBtn').onclick = function () { done(false); };
+        });
+    }
+
     async function tryAccessLink() {
         let token = null;
         try { token = new URLSearchParams(window.location.search).get('acceso'); } catch (e) {}
@@ -640,6 +672,34 @@ VIP.auth = (function () {
         // Sacar el token (y el fragmento con la clave) de la URL YA MISMO: es
         // de un solo uso y no tiene que quedar en el historial ni compartirse.
         try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
+
+        // #309: ¿ya hay OTRA cuenta logueada en este celular? (típico: cliente
+        // viejo que entra por una pauta y la landing le crea un usuario nuevo).
+        // Antes se pisaba la sesión en silencio y el cliente "perdía" su cuenta.
+        // Ahora se le pregunta; si elige la vieja, la nueva se descarta.
+        try {
+            const oldTok = localStorage.getItem('userToken');
+            const oldUser = _decodeJwtUser(oldTok);
+            if (oldTok && oldUser && oldUser.username && oldUser.role === 'user') {
+                const keepOld = await _askKeepOldAccount(oldUser.username);
+                if (keepOld) {
+                    const r = await fetch(`${VIP.config.API_URL}/api/auth/access-link/discard`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${oldTok}` },
+                        body: JSON.stringify({ token })
+                    });
+                    const j = await r.json().catch(() => ({}));
+                    if (r.ok && j.success) {
+                        VIP.state.currentToken = oldTok;
+                        VIP.state._landingCredsActive = false;
+                        VIP.ui.showToast('✅ Seguís con tu cuenta ' + oldUser.username, 'success');
+                        return false; // el caller sigue con verifyToken() de la cuenta vieja
+                    }
+                    // No se pudo descartar (sesión vieja vencida, link raro…) → canje normal.
+                    VIP.ui.showToast('No pudimos mantener tu cuenta anterior; entrás con la nueva.', 'info');
+                }
+            }
+        } catch (e) { /* ante cualquier duda, canje normal */ }
 
         // Pantalla inmediata, antes de cualquier request — junto con la clase
         // `casino-boot` del <head> (que esconde el login desde el primer

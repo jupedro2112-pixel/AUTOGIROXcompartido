@@ -17950,6 +17950,48 @@ app.post('/api/admin/users/:userId/access-link', authMiddleware, adminMiddleware
 // findOneAndUpdate borra el hash en el mismo paso — un segundo canje del mismo
 // link no encuentra nada. Al canjear se fuerza mustChangePassword: al entrar, la
 // PWA le muestra el recuadro de crear su contraseña nueva (flujo ya existente).
+// #309 (owner 2026-09-29): "mucha gente entra por una pauta, pone su nombre, se
+// le registra solo y eso reemplaza su sesión vieja". Cuando la PWA recibe un link
+// de landing y en ESE celular ya hay una sesión de OTRA cuenta, le pregunta al
+// cliente y, si elige seguir con la vieja, llama acá: la cuenta nueva (de la
+// landing, sin cargas, < 48 h) queda INACTIVA y apuntando a la vieja; el link se
+// consume sin loguear; nota en el chat de la cuenta vieja para el agente.
+app.post('/api/auth/access-link/discard', authLimiter, authMiddleware, async (req, res) => {
+  try {
+    const token = String((req.body && req.body.token) || '').trim();
+    if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return res.status(400).json({ error: 'Link inválido.' });
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+    const oldId = req.user.userId, oldUsername = req.user.username;
+    const cand = await User.findOne({ accessLinkHash: hash, role: 'user' })
+      .select('id username acquisitionSource acquisitionCampaign createdAt').lean();
+    if (!cand) return res.status(404).json({ error: 'Este link ya fue usado o no es válido.' });
+    if (cand.id === oldId) return res.json({ success: true, same: true });
+    const ageOk = cand.createdAt && (Date.now() - new Date(cand.createdAt).getTime()) < 48 * 3600 * 1000;
+    const deps = await Transaction.countDocuments({ userId: cand.id, type: 'deposit' });
+    if (cand.acquisitionSource !== 'landing' || !ageOk || deps > 0) {
+      // No es el caso "recién creada por la landing": no se toca, que el front canjee normal.
+      return res.status(409).json({ error: 'No se puede descartar esta cuenta.', keep: true });
+    }
+    let pub = null;
+    try { const c = cand.acquisitionCampaign ? await Campaign.findOne({ code: cand.acquisitionCampaign }).select('publisher').lean() : null; pub = c && c.publisher; } catch (_) {}
+    await User.updateOne({ id: cand.id }, {
+      $set: { isActive: false, accessLinkHash: null, duplicateOfUserId: oldId,
+              blockReason: `Duplicado de landing: el cliente eligió seguir con @${oldUsername} (${new Date().toISOString().slice(0, 10)})` },
+      $addToSet: { tags: 'duplicado-landing' }
+    });
+    try { await ChatStatus.updateOne({ userId: cand.id }, { $set: { status: 'closed' } }); } catch (_) {}
+    try {
+      await _emitAdminOnlyChatNote(oldId, oldUsername,
+        `🔁 Volvió por una pauta${pub ? ` de ${pub}` : ''}${cand.acquisitionCampaign ? ` (${cand.acquisitionCampaign})` : ''}: la landing le creó @${cand.username} pero eligió seguir con ESTA cuenta. @${cand.username} quedó desactivada (no es multicuenta, es el mismo cliente).`);
+    } catch (_) {}
+    logger.info(`[access-link] descartada cuenta de landing @${cand.username} → el cliente sigue con @${oldUsername}`);
+    res.json({ success: true, discarded: cand.username });
+  } catch (e) {
+    logger.warn(`[access-link] discard falló: ${e.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
 app.post('/api/auth/access-link', authLimiter, async (req, res) => {
   try {
     const token = String((req.body && req.body.token) || '').trim();

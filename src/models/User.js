@@ -391,6 +391,10 @@ const userSchema = new mongoose.Schema({
   // todavía no eligió (el widget le muestra las dos opciones). Se puede cambiar
   // cuando quiera desde el widget; el panel lo muestra al lado del nombre.
   depositMode: { type: String, enum: ['auto', 'manual', null], default: null },
+  // #309: cuenta creada por la landing que el cliente DESCARTÓ porque ya tenía
+  // otra en el celular (eligió seguir con la vieja). Queda inactiva y apunta a la
+  // cuenta que sí usa. No es multicuenta: es el mismo cliente que volvió por una pauta.
+  duplicateOfUserId: { type: String, default: null, index: true },
   // true = la cuenta la creó UN AGENTE desde el panel (admin general, depositor
   // o publisher_admin), NO el propio cliente registrándose. Lo usan los gates
   // que distinguen auto-registro de alta asistida (ej. el bono de instalación

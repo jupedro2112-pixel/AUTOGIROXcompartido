@@ -8,6 +8,29 @@
 
 ## Sesión 2026-09-29
 
+### 309. Cliente viejo que entra por una pauta: NO se le pisa la cuenta (pregunta con cuál seguir)
+- Owner: "entra de una pauta, pone su nombre, se le registra solo y eso reemplaza la
+  sesión vieja; su usuario viejo deja de estar activo y pasa a ser el nuevo del
+  publicista". La landing solo pide nombre (sin teléfono) → el server no puede saber
+  que es el mismo; pero en el celular SÍ está la sesión vieja.
+- PWA (SW v188): `tryAccessLink` — si hay un `userToken` vigente de OTRA cuenta (rol
+  user), ANTES de canjear muestra el cartel "Ya tenés una cuenta en este celular:
+  @viejo … ¿con cuál querés seguir?" (`_askKeepOldAccount`, encima del splash).
+  **Seguir con la vieja** → `POST /api/auth/access-link/discard` (con el token viejo) y
+  sigue con `verifyToken()` de la cuenta vieja. **Entrar con la nueva** → canje normal
+  (la vieja no se borra: puede volver con usuario y clave).
+- Backend: `/api/auth/access-link/discard` (authMiddleware = sesión vieja): la cuenta
+  del link tiene que ser de landing, < 48 h y sin cargas → `isActive:false`,
+  `duplicateOfUserId` (campo nuevo en User), tag `duplicado-landing`, `blockReason`
+  explicativo, link consumido, chat cerrado; nota 🔁 en el chat de la cuenta vieja
+  ("volvió por la pauta de X … no es multicuenta"). Si no cumple → 409 y el front canjea
+  normal.
+- Límites: si el cliente entra desde OTRO celular (o sin sesión guardada) no hay forma
+  de detectarlo acá — eso se resuelve en la landing (otro repo) con un "¿Ya tenés
+  cuenta? Ingresá" o pidiendo teléfono. El CompleteRegistration de la pauta ya se
+  disparó al crear la cuenta (no se puede deshacer); el registro queda marcado
+  `duplicado-landing` para descontarlo en los reportes si hace falta.
+
 ### 308c. "Invitá amigos" copia el link y ofrece cómo mandarlo
 - Owner: "que el botón de invitar copie el link y dé opciones de invitar vía WhatsApp".
   `VIP.ui._rwInviteFriends()` (banner del inicio del asistente): copia el link al
