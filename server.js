@@ -3442,7 +3442,7 @@ const authMiddleware = async (req, res, next) => {
     // Solo los campos que este middleware usa (corre en CADA request; hidratar
     // el doc completo con fcmTokens/tagHistory/etc. era costo puro).
     // ⚠️ Si un chequeo futuro necesita otro campo del user: agregarlo acá.
-    const AUTH_USER_FIELDS = 'id username role isActive isBlocked blockReason tokenVersion mustChangePassword';
+    const AUTH_USER_FIELDS = 'id username role isActive isBlocked blockReason tokenVersion mustChangePassword replacedByUsername';
     let user = await User.findOne({ id: decoded.userId }).select(AUTH_USER_FIELDS);
 
     if (!user) {
@@ -3463,6 +3463,9 @@ const authMiddleware = async (req, res, next) => {
     }
 
     if (user.isBlocked === true) {
+      if (user.replacedByUsername) { // #309b
+        return res.status(403).json({ error: `Esta cuenta fue reemplazada por tu cuenta nueva: ${user.replacedByUsername}. Ingresá con ese usuario.`, code: 'USER_REPLACED', replacedBy: user.replacedByUsername });
+      }
       return res.status(403).json({
         error: 'Tu cuenta está bloqueada. Contactá a soporte.',
         code: 'USER_BLOCKED',
@@ -4797,6 +4800,13 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
 
     // Reject login for blocked users before doing any further work.
     if (userObj.isBlocked === true) {
+      // #309b: cuenta reemplazada → decirle con cuál entrar.
+      if (userObj.replacedByUsername) {
+        return res.status(403).json({
+          error: `🔁 Esta cuenta fue reemplazada por tu cuenta nueva: ${userObj.replacedByUsername}. Ingresá con ese usuario (misma clave que elegiste al crearla). Si no la recordás, escribinos por soporte.`,
+          code: 'USER_REPLACED', replacedBy: userObj.replacedByUsername
+        });
+      }
       return res.status(403).json({
         error: `Tu cuenta está bloqueada: ${userObj.blockReason || 'Contactá a soporte.'}`,
         code: 'USER_BLOCKED'
@@ -18006,6 +18016,40 @@ app.post('/api/auth/access-link/discard', authLimiter, authMiddleware, async (re
     res.json({ success: true, discarded: cand.username });
   } catch (e) {
     logger.warn(`[access-link] discard falló: ${e.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// #309b (owner 2026-09-29): el cliente eligió la cuenta NUEVA de la landing → la
+// VIEJA se BLOQUEA con motivo y con el usuario nuevo guardado, así cuando intente
+// entrar con la vieja se le dice "tu cuenta ahora es @nueva". Lo llama la PWA
+// con la sesión NUEVA (Authorization) y el token viejo en el body (se verifica
+// firma + tokenVersion: nadie puede bloquear una cuenta ajena a mano).
+app.post('/api/auth/account-replaced', authLimiter, authMiddleware, async (req, res) => {
+  try {
+    const oldTok = String((req.body && req.body.oldToken) || '');
+    let dec = null;
+    try { dec = jwt.verify(oldTok, JWT_SECRET, { algorithms: ['HS256'] }); } catch (_) { dec = null; }
+    if (!dec || !dec.userId || dec.userId === req.user.userId) return res.status(400).json({ error: 'Token anterior inválido.' });
+    const oldU = await User.findOne({ id: dec.userId, role: 'user' }).select('id username tokenVersion isBlocked').lean();
+    if (!oldU || (dec.tokenVersion ?? 0) !== (oldU.tokenVersion ?? 0)) return res.status(400).json({ error: 'Sesión anterior vencida.' });
+    const newU = await User.findOne({ id: req.user.userId }).select('id username').lean();
+    if (!newU) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (oldU.isBlocked) return res.json({ success: true, already: true });
+    await User.updateOne({ id: oldU.id }, {
+      $set: { isBlocked: true, replacedByUserId: newU.id, replacedByUsername: newU.username,
+              blockReason: `Reemplazada por @${newU.username}: el cliente eligió la cuenta nueva al entrar por una pauta (${new Date().toISOString().slice(0, 10)})` },
+      $addToSet: { tags: 'reemplazada' }
+    });
+    try { await ChatStatus.updateOne({ userId: oldU.id }, { $set: { status: 'closed' } }); } catch (_) {}
+    try {
+      await _emitAdminOnlyChatNote(oldU.id, oldU.username, `🔁 Cuenta REEMPLAZADA: el cliente entró por una pauta y eligió seguir con la cuenta nueva @${newU.username}. Esta quedó bloqueada; si entra con esta, el login le dice que use @${newU.username}.`);
+      await _emitAdminOnlyChatNote(newU.id, newU.username, `🔁 Este cliente ya tenía la cuenta @${oldU.username} y eligió seguir con ESTA (la vieja quedó bloqueada). No es multicuenta: es el mismo cliente.`);
+    } catch (_) {}
+    logger.info(`[access-link] cuenta @${oldU.username} bloqueada: reemplazada por @${newU.username}`);
+    res.json({ success: true, replaced: oldU.username });
+  } catch (e) {
+    logger.warn(`[access-link] account-replaced falló: ${e.message}`);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });

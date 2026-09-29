@@ -8,6 +8,18 @@
 
 ## Sesión 2026-09-29
 
+### 309b. Si elige la cuenta NUEVA, la vieja se bloquea con motivo y el login le dice cuál usar
+- Owner: "si elige la nueva, la vieja no se pierde pero se bloquea, deja el motivo y
+  cuando quiere ingresar le muestra su usuario nuevo para que sepa cuál es".
+- PWA (SW v189): el cartel avisa "⚠️ si elegís la nueva, @vieja queda bloqueada"; al
+  canjear OK la nueva, llama `POST /api/auth/account-replaced` (sesión nueva +
+  `oldToken` en el body).
+- Backend: verifica firma + `tokenVersion` del token viejo → `isBlocked:true`,
+  `replacedByUserId/Username` (campos nuevos), `blockReason` "Reemplazada por @nueva…",
+  tag `reemplazada`, chat cerrado, notas 🔁 en los dos chats. Login (`/api/auth/login`) y
+  `authMiddleware` responden `USER_REPLACED` con el mensaje "Esta cuenta fue
+  reemplazada por tu cuenta nueva: @nueva. Ingresá con ese usuario".
+
 ### 310. Dos cuentas con el mismo teléfono verificado: chequeo de unicidad robusto
 - Owner (captura: `gxivana024` e `ivana`, ambas ✅ con +541157740024). Los 5 chequeos
   (registro con OTP, verificar teléfono send/confirm, cambio de clave con OTP send/

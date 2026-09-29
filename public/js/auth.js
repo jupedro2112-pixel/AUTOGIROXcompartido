@@ -623,7 +623,7 @@ VIP.auth = (function () {
                   '<div style="font-size:13.5px;color:#cfd6de;text-align:center;line-height:1.45;margin-bottom:14px;">Estás entrando por un link que te crea una cuenta <b>nueva</b>, pero acá ya estabas con <b style="color:#ffd700;">' + String(oldUsername).replace(/[<>&]/g, '') + '</b> (con tu saldo, tus premios y tu historial). ¿Con cuál querés seguir?</div>' +
                   '<button type="button" id="keepOldBtn" style="width:100%;border:none;cursor:pointer;background:linear-gradient(135deg,#f7e08a,#d4af37 50%,#b8860b);color:#1a1200;border-radius:14px;padding:14px;font-size:15px;font-weight:900;margin-bottom:8px;">✅ Seguir con ' + String(oldUsername).replace(/[<>&]/g, '') + ' (recomendado)</button>' +
                   '<button type="button" id="useNewBtn" style="width:100%;cursor:pointer;background:rgba(255,255,255,0.06);color:#cfd6de;border:1px solid rgba(255,255,255,0.14);border-radius:14px;padding:12px;font-size:13.5px;font-weight:800;">Entrar con la cuenta nueva</button>' +
-                  '<div style="font-size:11px;color:#8a97a8;text-align:center;margin-top:10px;">Si elegís la nueva, la anterior sigue existiendo: podés volver a entrar con tu usuario y clave.</div>' +
+                  '<div style="font-size:11px;color:#8a97a8;text-align:center;margin-top:10px;">⚠️ Si elegís la nueva, <b>' + String(oldUsername).replace(/[<>&]/g, '') + ' queda bloqueada</b> (con su saldo e historial). Si después intentás entrar con ella, te vamos a recordar tu usuario nuevo.</div>' +
                 '</div>';
             document.body.appendChild(ov);
             const done = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
@@ -682,6 +682,7 @@ VIP.auth = (function () {
             const oldUser = _decodeJwtUser(oldTok);
             if (oldTok && oldUser && oldUser.username && oldUser.role === 'user') {
                 const keepOld = await _askKeepOldAccount(oldUser.username);
+                if (!keepOld) VIP.state._replaceOldToken = oldTok; // #309b: se bloquea al canjear OK
                 if (keepOld) {
                     const r = await fetch(`${VIP.config.API_URL}/api/auth/access-link/discard`, {
                         method: 'POST',
@@ -738,6 +739,16 @@ VIP.auth = (function () {
                 if (data.casinoLogoutUrl) VIP.state._casinoLogoutUrl = data.casinoLogoutUrl;
                 VIP.state.currentToken = data.token;
                 localStorage.setItem('userToken', data.token);
+                // #309b: eligió la cuenta NUEVA → la vieja queda bloqueada con el
+                // usuario nuevo guardado (el login de la vieja le dirá cuál usar).
+                if (VIP.state._replaceOldToken) {
+                    const _ot = VIP.state._replaceOldToken; VIP.state._replaceOldToken = null;
+                    fetch(`${VIP.config.API_URL}/api/auth/account-replaced`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${data.token}` },
+                        body: JSON.stringify({ oldToken: _ot })
+                    }).catch(function () {});
+                }
                 // Casino YA, sin esperar verifyToken (que corre en paralelo y
                 // completa la sesión/chat detrás del casino). Con el link SSO
                 // adelantado no hay ni un request más; sin él, enterCasino()
