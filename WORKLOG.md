@@ -8,6 +8,15 @@
 
 ## Sesión 2026-09-29
 
+### 308c. "Invitá amigos" copia el link y ofrece cómo mandarlo
+- Owner: "que el botón de invitar copie el link y dé opciones de invitar vía WhatsApp".
+  `VIP.ui._rwInviteFriends()` (banner del inicio del asistente): copia el link al
+  portapapeles y muestra en el hilo "✅ Link copiado" + el link + botones **💬 Enviar por
+  WhatsApp** (`wa.me/?text=` → elegir contacto/grupo), **📤 Otras apps** (share nativo, si
+  existe), **📋 Copiar de nuevo**, **🤝 Ver mis referidos** (hub). Si el link no estaba
+  cargado lo pide y reintenta. La tarjeta del hub usa el mismo WhatsApp directo
+  (`_rwShareWa`). SW → v187.
+
 ### 308b. Mensaje de "Compartir por WhatsApp" (referidos) editable desde COMANDOS
 - Comando nuevo **`/sys_referidos_compartir`** con variables `{link}`, `{codigo}`, `{pct}`,
   `{username}`. `/api/rewards/summary` devuelve `referralShareTpl` (renderizado con

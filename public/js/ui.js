@@ -2337,10 +2337,11 @@ VIP.ui.casinoBotGo = function(state) {
     if (VIP.ui._depositMode()) VIP.ui._botMsg(VIP.ui._depositModeChip());
     // #308: banner chico de referidos (segundo plano, pero que se vea): abre el
     // hub PREMIOS en la tarjeta "Invitá y ganá".
-    const _rb = VIP.ui._botMsg('<div onclick="VIP.ui.openRewardsHub(\'ref\')" style="display:flex;align-items:center;gap:9px;cursor:pointer;">' +
+    const _rb = VIP.ui._botMsg('<div onclick="VIP.ui._rwInviteFriends()" style="display:flex;align-items:center;gap:9px;cursor:pointer;">' +
       '<span style="font-size:22px;flex:none;">🤝</span>' +
       '<div style="flex:1;min-width:0;line-height:1.3;"><b style="color:#ff9800;">Invitá amigos y ganá el ' + VIP.ui._rwRefPct() + '%</b> de lo que pierdan jugando, todos los meses.' +
-      '<div style="font-size:11px;opacity:.8;">Tocá para ver tu link y compartirlo 👉</div></div></div>');
+      '<div style="font-size:11px;opacity:.8;">Tocá: se copia tu link y elegís por dónde mandarlo 👉</div></div></div>');
+    if (!VIP.ui._rwRef) { try { VIP.ui._rwLoadReferrals(); } catch (e) {} } // precargar el link
     if (_rb) { _rb.style.border = '1px solid rgba(255,152,0,0.55)'; _rb.style.background = 'linear-gradient(135deg,rgba(255,152,0,0.12),rgba(255,152,0,0.04))'; }
     // (owner 2026-09-02: se SACÓ del asistente el "Estás como X" + botón
     // "Cambiar de cuenta / Salir" de #252 — no quiere que el cliente pueda
@@ -3315,6 +3316,46 @@ VIP.ui._rwShareRef = function() {
   } catch (e) {}
   window.open('https://wa.me/?text=' + encodeURIComponent(txt), '_blank');
 };
+// #308c: botón "Invitá amigos" del inicio del asistente → COPIA el link al toque
+// y ofrece cómo mandarlo (WhatsApp / otras apps / ver referidos). Si el link
+// todavía no se cargó, lo pide y reintenta solo.
+VIP.ui._rwInviteFriends = function() {
+  const me = (VIP.ui._rwRef && VIP.ui._rwRef.me) || null;
+  if (!me || !me.referralLink) {
+    VIP.ui.showToast('⏳ Preparando tu link…', 'info');
+    const h = { 'Authorization': `Bearer ${VIP.state.currentToken}` };
+    fetch(`${VIP.config.API_URL}/api/referrals/me`, { headers: h }).then(function(r) { return r.ok ? r.json() : null; }).then(function(j) {
+      VIP.ui._rwRef = Object.assign({}, VIP.ui._rwRef || {}, { me: (j && j.data) || null, at: Date.now() });
+      if (VIP.ui._rwRef.me && VIP.ui._rwRef.me.referralLink) VIP.ui._rwInviteFriends();
+      else VIP.ui.showToast('No pudimos traer tu link. Probá de nuevo.', 'error');
+    }).catch(function() { VIP.ui.showToast('Error de conexión', 'error'); });
+    return;
+  }
+  // 1) copiar
+  try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(me.referralLink).catch(function() {}); } catch (e) {}
+  // 2) opciones en el hilo del asistente
+  const area = document.getElementById('casinoBotArea');
+  if (!area) { VIP.ui._rwShareRef(); return; }
+  const old = document.getElementById('botInviteBlock'); if (old) old.remove();
+  const oldRow = document.getElementById('botInviteRow'); if (oldRow) oldRow.remove();
+  const b = VIP.ui._botMsg('✅ <b>Link copiado</b> — ya lo podés pegar donde quieras.<br>' +
+    '<div class="cwBox" style="border-radius:9px;padding:7px 9px;margin-top:6px;font-size:11.5px;font-family:monospace;word-break:break-all;">' + _wrEsc(me.referralLink) + '</div>' +
+    '<div style="margin-top:6px;">¿Cómo querés invitarlos? Cobrás el <b>' + VIP.ui._rwRefPct() + '%</b> de lo que pierdan, todos los meses.</div>');
+  if (b) b.id = 'botInviteBlock';
+  const hasShare = (function() { try { return !!navigator.share; } catch (e) { return false; } })();
+  VIP.ui._botRow(
+    VIP.ui._botBtn('💬 Enviar por WhatsApp', "VIP.ui._rwShareWa()", true) +
+    (hasShare ? VIP.ui._botBtn('📤 Otras apps', "VIP.ui._rwShareRef()") : '') +
+    VIP.ui._botBtn('📋 Copiar de nuevo', "VIP.ui._rwCopyRef()") +
+    VIP.ui._botBtn('🤝 Ver mis referidos', "VIP.ui.openRewardsHub('ref')")
+  );
+  const row = area.lastElementChild; if (row) row.id = 'botInviteRow';
+};
+// WhatsApp directo (elegir contacto o grupo desde la app), sin pasar por el share nativo.
+VIP.ui._rwShareWa = function() {
+  window.open('https://wa.me/?text=' + encodeURIComponent(VIP.ui._rwRefShareText()), '_blank');
+};
+
 VIP.ui._rwReferralCard = function() {
   const pct = VIP.ui._rwRefPct();
   const acc = '#ff9800';
@@ -3344,7 +3385,7 @@ VIP.ui._rwReferralCard = function() {
       '</div>' +
       '<div style="display:flex;gap:8px;margin-bottom:10px;">' +
         '<button type="button" onclick="VIP.ui._rwCopyRef()" style="flex:1;border:none;cursor:pointer;background:rgba(255,255,255,0.10);color:#fff;border-radius:11px;padding:11px;font-size:13px;font-weight:800;">📋 Copiar link</button>' +
-        '<button type="button" onclick="VIP.ui._rwShareRef()" style="flex:1.2;border:none;cursor:pointer;background:linear-gradient(135deg,#25d366,#128c4a);color:#fff;border-radius:11px;padding:11px;font-size:13px;font-weight:900;box-shadow:0 6px 16px rgba(37,211,102,0.3);">💬 Compartir por WhatsApp</button>' +
+        '<button type="button" onclick="VIP.ui._rwShareWa()" style="flex:1.2;border:none;cursor:pointer;background:linear-gradient(135deg,#25d366,#128c4a);color:#fff;border-radius:11px;padding:11px;font-size:13px;font-weight:900;box-shadow:0 6px 16px rgba(37,211,102,0.3);">💬 Enviar por WhatsApp</button>' +
       '</div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
         stat('REFERIDOS', activos, activos > 0 ? '#26e07f' : '#fff') +
