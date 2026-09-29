@@ -19,6 +19,11 @@
   chequeos. Backfill en cada arranque: `phoneKey` para TODOS los que tienen teléfono
   (antes solo verificados). Las dos cuentas ya duplicadas quedan como están (revisar a
   mano cuál es la real; la etiqueta/nota de multicuenta no cambia).
+- #310b (owner: "¿no es por el 9, o el 15 en vez del 11?"): el 9 de móvil ya se quitaba;
+  el **15 local** NO (`11 15 5774-0024` daba clave `1557740024` ≠ `1157740024`).
+  `normalizePhoneKey` ahora quita el 15 cuando el número tiene 12 dígitos (área de 2/3/4
+  + 15 + número). One-shot V3 al arrancar: recalcula `phoneKey` de TODOS los usuarios
+  con teléfono (`migration_backfill_phonekey_v3_done`).
 
 ### 309. Cliente viejo que entra por una pauta: NO se le pisa la cuenta (pregunta con cuál seguir)
 - Owner: "entra de una pauta, pone su nombre, se le registra solo y eso reemplaza la

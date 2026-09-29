@@ -11253,14 +11253,20 @@ async function initializeData() {
     logger.error(`[startup-migration] backfill phoneKey wrapper: ${e.message}`);
   }
 
-  // #310: phoneKey también para los NO verificados con teléfono (alta por panel /
-  // importados). Idempotente: solo toca los que no lo tienen. Corre en cada arranque.
+  // #310/#310b: phoneKey para TODOS los que tienen teléfono (verificados o no) y
+  // RE-cálculo one-shot V3 con la normalización nueva (quita el "15" local AR).
+  // Después del one-shot, en cada arranque solo se completan los que no tienen clave.
   try {
     const UserModel = require('./src/models/User');
-    const faltan = await UserModel.find({ phone: { $nin: [null, ''] }, $or: [{ phoneKey: null }, { phoneKey: { $exists: false } }] }).select('id phone').lean();
+    const flag3 = await Config.findOne({ key: 'migration_backfill_phonekey_v3_done' }).lean();
+    const full = !flag3 || flag3.value !== true;
+    const q = full ? { phone: { $nin: [null, ''] } } : { phone: { $nin: [null, ''] }, $or: [{ phoneKey: null }, { phoneKey: { $exists: false } }] };
+    const lista = await UserModel.find(q).select('id phone phoneKey').lean();
     const ops = [];
-    for (const u of faltan) { const k = normalizePhoneKey(u.phone); if (k) ops.push({ updateOne: { filter: { id: u.id }, update: { $set: { phoneKey: k } } } }); }
-    if (ops.length) { await UserModel.bulkWrite(ops, { ordered: false }); logger.info(`[startup-migration] phoneKey (#310, todos con teléfono): ${ops.length} completados`); }
+    for (const u of lista) { const k = normalizePhoneKey(u.phone); if (k && k !== u.phoneKey) ops.push({ updateOne: { filter: { id: u.id }, update: { $set: { phoneKey: k } } } }); }
+    if (ops.length) await UserModel.bulkWrite(ops, { ordered: false });
+    if (full) await Config.set('migration_backfill_phonekey_v3_done', true, 'startup-migration');
+    logger.info(`[startup-migration] phoneKey ${full ? 'V3 (one-shot, todos)' : '(faltantes)'}: ${ops.length} actualizados`);
   } catch (e) { logger.error(`[startup-migration] phoneKey #310: ${e.message}`); }
   // One-shot V2: RE-calcular phoneKey de TODOS los verificados con la lógica nueva
   // (la v1 usaba "últimos 10" y no normalizaba el 0 de Paraguay ni el 9 de Argentina).

@@ -240,6 +240,14 @@ const normalizePhoneKey = (phone) => {
   d = d.replace(/^0+/, '');
   // 3) Quitar el "9" de móvil de Argentina (queda 9 + 10 díg = 11).
   if (d.length === 11 && d.startsWith('9')) d = d.slice(1);
+  // 3b) #310b: quitar el "15" local de Argentina (área + 15 + número = 12 díg):
+  //     11 15 5774-0024 → 11 5774-0024 · 221 15 555-1234 → 221 555-1234 · 2966 15 55-1234.
+  //     Sin esto, "1115..." y "+5411..." daban claves distintas → mismo número en 2 cuentas.
+  if (d.length === 12) {
+    for (const area of [2, 3, 4]) {
+      if (d.slice(area, area + 2) === '15') { d = d.slice(0, area) + d.slice(area + 2); break; }
+    }
+  }
   // 4) Núcleo: últimos 10 dígitos (o menos).
   return d.slice(-10);
 };
