@@ -80,6 +80,25 @@ const { setRedisClient, getRedisClient } = require('./src/utils/redisClient');
 const { generateAndSendOTP, verifyOTP } = require('./src/services/otpService');
 const { sendSMS } = require('./src/services/smsService');
 const { validateInternationalPhone, normalizePhoneKey } = require('./src/middlewares/security');
+// #310 (owner 2026-09-29: "¿por qué dos cuentas pueden tener el mismo número?").
+// Los chequeos de unicidad miraban SOLO `phoneKey` (clave normalizada): una cuenta
+// vieja con el teléfono guardado pero sin phoneKey (alta por panel, importadas,
+// verificadas antes del backfill) no aparecía y el número se podía verificar en
+// una segunda cuenta. Ahora se busca por phoneKey O por los últimos 10 dígitos
+// del `phone` guardado (regex al final), y en el arranque se rellena phoneKey a
+// TODOS los que tienen teléfono (no solo a los verificados).
+async function _phoneTakenByOther(normalizedPhone, exceptUserId) {
+  const key = normalizePhoneKey(normalizedPhone);
+  const digits = String(normalizedPhone || '').replace(/\D/g, '');
+  const last10 = digits.slice(-10);
+  const or = [];
+  if (key) or.push({ phoneKey: key });
+  if (last10.length === 10) or.push({ phone: { $regex: last10.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$' } });
+  if (!or.length) return null;
+  const q = { $or: or, phoneVerified: true };
+  if (exceptUserId) q.id = { $ne: exceptUserId };
+  return User.findOne(q).select('id username').lean();
+}
 
 // ============================================
 // SEGURIDAD - RATE LIMITING
@@ -3916,7 +3935,7 @@ app.post('/api/auth/register', authLimiter, registerIpLimiter, async (req, res) 
         return res.status(400).json({ error: otpResult.error || 'Código de verificación incorrecto o expirado' });
       }
       // Unicidad por clave NORMALIZADA (el mismo número en distinto formato = misma clave).
-      const existingPhoneUser = await User.findOne({ phoneKey: normalizePhoneKey(normalizedPhone), phoneVerified: true }).lean();
+      const existingPhoneUser = await _phoneTakenByOther(normalizedPhone, null); // #310
       if (existingPhoneUser) {
         return res.status(400).json({ error: 'Este número de teléfono ya está registrado por otra cuenta' });
       }
@@ -5350,11 +5369,7 @@ app.post('/api/auth/change-password', authMiddleware, authLimiter, async (req, r
       // Verificar que el teléfono no esté ya registrado y verificado por otro usuario
       // (por clave normalizada: detecta el mismo número en distinto formato).
       const _reqPhoneKey = normalizePhoneKey(requestedPhone);
-      const otherUser = await User.findOne({
-        phoneKey: _reqPhoneKey,
-        phoneVerified: true,
-        id: { $ne: user.id }
-      }).lean();
+      const otherUser = await _phoneTakenByOther(requestedPhone, user.id); // #310
       if (otherUser) {
         return res.status(400).json({ error: 'Este número de teléfono ya está registrado por otra cuenta' });
       }
@@ -5462,11 +5477,7 @@ app.post('/api/auth/change-password/send-otp', authMiddleware, sensitiveLimiter,
 
     // Si otro usuario distinto ya tiene este teléfono verificado, rechazar (por clave normalizada).
     const _normPhoneKey = normalizePhoneKey(normalizedPhone);
-    const otherUser = await User.findOne({
-      phoneKey: _normPhoneKey,
-      phoneVerified: true,
-      id: { $ne: user.id }
-    }).lean();
+    const otherUser = await _phoneTakenByOther(normalizedPhone, user.id); // #310
     if (otherUser) {
       return res.status(400).json({ error: 'Este número de teléfono ya está registrado por otra cuenta' });
     }
@@ -6035,11 +6046,7 @@ app.post('/api/auth/verify-phone/send-otp', authMiddleware, sensitiveLimiter, sm
 
     // Si ese teléfono ya está vinculado a OTRA cuenta (verificado), bloqueamos ANTES de
     // mandar el SMS (por clave normalizada: detecta el mismo número en distinto formato).
-    const existingPhone = await User.findOne({
-      phoneKey: normalizePhoneKey(normalizedPhone),
-      phoneVerified: true,
-      id: { $ne: req.user.userId }
-    }).lean();
+    const existingPhone = await _phoneTakenByOther(normalizedPhone, req.user.userId); // #310
     if (existingPhone) {
       return res.status(400).json({
         error: 'Este número ya está vinculado a una cuenta. Ingresá con esa cuenta principal, o si no la recordás usá "Recuperar contraseña". Si querés verificar otro número, ingresá uno distinto.',
@@ -6088,11 +6095,7 @@ app.post('/api/auth/verify-phone/confirm', authMiddleware, sensitiveLimiter, asy
     // Volver a chequear unicidad por si alguien más verificó ese número entre el send y el
     // confirm (por clave normalizada: el mismo número en distinto formato = misma clave).
     const _vpPhoneKey = normalizePhoneKey(normalizedPhone);
-    const existingPhone = await User.findOne({
-      phoneKey: _vpPhoneKey,
-      phoneVerified: true,
-      id: { $ne: req.user.userId }
-    }).lean();
+    const existingPhone = await _phoneTakenByOther(normalizedPhone, req.user.userId); // #310
     if (existingPhone) {
       return res.status(400).json({
         error: 'Este número ya está vinculado a una cuenta. Ingresá con esa cuenta principal, o si no la recordás usá "Recuperar contraseña". Si querés verificar otro número, ingresá uno distinto.',
@@ -11250,6 +11253,15 @@ async function initializeData() {
     logger.error(`[startup-migration] backfill phoneKey wrapper: ${e.message}`);
   }
 
+  // #310: phoneKey también para los NO verificados con teléfono (alta por panel /
+  // importados). Idempotente: solo toca los que no lo tienen. Corre en cada arranque.
+  try {
+    const UserModel = require('./src/models/User');
+    const faltan = await UserModel.find({ phone: { $nin: [null, ''] }, $or: [{ phoneKey: null }, { phoneKey: { $exists: false } }] }).select('id phone').lean();
+    const ops = [];
+    for (const u of faltan) { const k = normalizePhoneKey(u.phone); if (k) ops.push({ updateOne: { filter: { id: u.id }, update: { $set: { phoneKey: k } } } }); }
+    if (ops.length) { await UserModel.bulkWrite(ops, { ordered: false }); logger.info(`[startup-migration] phoneKey (#310, todos con teléfono): ${ops.length} completados`); }
+  } catch (e) { logger.error(`[startup-migration] phoneKey #310: ${e.message}`); }
   // One-shot V2: RE-calcular phoneKey de TODOS los verificados con la lógica nueva
   // (la v1 usaba "últimos 10" y no normalizaba el 0 de Paraguay ni el 9 de Argentina).
   try {

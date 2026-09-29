@@ -8,6 +8,18 @@
 
 ## Sesión 2026-09-29
 
+### 310. Dos cuentas con el mismo teléfono verificado: chequeo de unicidad robusto
+- Owner (captura: `gxivana024` e `ivana`, ambas ✅ con +541157740024). Los 5 chequeos
+  (registro con OTP, verificar teléfono send/confirm, cambio de clave con OTP send/
+  confirm) buscaban `phoneKey` + `phoneVerified:true`: una cuenta vieja con `phone` pero
+  sin `phoneKey` (alta por panel / importada / verificada antes del backfill) no aparecía
+  y el número se podía verificar en una segunda cuenta.
+- Fix: `_phoneTakenByOther(phone, exceptId)` busca por `phoneKey` **o** por los últimos
+  10 dígitos del `phone` guardado (regex al final) entre verificados; reemplaza los 5
+  chequeos. Backfill en cada arranque: `phoneKey` para TODOS los que tienen teléfono
+  (antes solo verificados). Las dos cuentas ya duplicadas quedan como están (revisar a
+  mano cuál es la real; la etiqueta/nota de multicuenta no cambia).
+
 ### 309. Cliente viejo que entra por una pauta: NO se le pisa la cuenta (pregunta con cuál seguir)
 - Owner: "entra de una pauta, pone su nombre, se le registra solo y eso reemplaza la
   sesión vieja; su usuario viejo deja de estar activo y pasa a ser el nuevo del
