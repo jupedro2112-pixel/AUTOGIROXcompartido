@@ -4,9 +4,22 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-09-24**
+> **Última actualización: 2026-09-30**
 
 ## Sesión 2026-09-30
+
+### 313. Docs al día + regla: el asistente los actualiza SOLO en cada cambio
+- Owner: "que se vaya actualizando a medida que haya cosas nuevas, que no tenga que
+  decirte qué actualizar en architecture, worklog y claude". Regla reforzada en
+  CLAUDE.md → "Flujo de trabajo del asistente" paso 3 (docs en el MISMO commit, corregir
+  lo que quede viejo, no sólo agregar) y paso 4 (commit + push siempre).
+- ARCHITECTURE corregido (estaba stale): regalos = BONO vía `creditGift` (#266) en
+  §4.5/§5/§9 (decía "depósito libre"); referidos 3% directo + pago automático día 1
+  (#307) en §4.6/§5 (decía 8% × 7%); reembolso diario de vuelta (#297) en §4.1/§8;
+  ruleta diaria v2 / fueguito con rollover / bono instalación neutralizado en §5;
+  `giroxReportsService` fuera de §9; crons nuevos en §7 (`_processNotifBatchQueue`,
+  `_expireDailyRoulettePct`, `_runMonthlyReferralPayout`). Tamaños: server.js ~23k,
+  admin.js ~14k. Sin cambios de código.
 
 ### 312. "Volvieron por pauta": etiqueta en las DOS cuentas + sección del panel
 - Owner: que la cuenta nueva también quede etiquetada cuando reemplaza a una vieja (para

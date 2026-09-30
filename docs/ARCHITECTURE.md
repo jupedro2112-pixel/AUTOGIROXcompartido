@@ -5,7 +5,10 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-08-03** — niveles VIP por apostado acumulado (réplica de
+> Última actualización: **2026-09-30** — limpieza de partes stale: regalos como BONO
+> (#266, §4.5/§5/§9), referidos 3% (#307, §4.6/§5), reembolso diario de vuelta (#297,
+> §4.1/§8), crons nuevos (§7), `giroxReportsService` fuera de §9.
+> Antes: 2026-08-03 — niveles VIP por apostado acumulado (réplica de
 > Stake): §2 (VipWagerMonth + campos User), §4.4 (references vip-lvl/vip-rake), §4.6
 > reescrita (el scraping del panel se ELIMINÓ en la v1.9 — ahora stats por username con
 > la Partner API), §4.8 (envs VIP_*, se fueron las GIROX_ADMIN_*), §5 (flujo VIP +
@@ -295,7 +298,7 @@ Quedan sólo para poder revertir; se borran más adelante. **No los uses para na
 | `src/services/giroxService.js` | server.js (`girox.*`), migración | **Cliente ÚNICO de la Partner API.** Altas (`createPlatformUser`, `syncUserToPlatform`), consulta (`getUserInfoByName`, `getUserBalance(WithRetry)`), credenciales (`validateCredentials`, `changeUserPassword`), SSO (`createSession`, `embed:true`) y plata (`depositToUser` = cargas reales, `withdrawFromUser`, `creditGift` = TODO regalo como BONO `/bonus` con fallback a depósito+multiplier si hay bono activo/feat apagado — #266; `creditUserBalance` sin multiplier delega en `creditGift` x0). Auth por header `X-Api-Key`. Rate limit + reintentos propios. |
 | `src/services/giroxUserLinkService.js` | reembolsos, referidos | `resolveGiroxUserId(userId, username)` — lee `User.giroxUserId` y, si falta, lo backfillea al vuelo (match EXACTO del nombre, doble verificación). (🪦 `giroxReportsService.js` — el que scrapeaba netwin del PANEL — se ELIMINÓ el 2026-07-31 con la v1.9: el netwin sale de `getPlayerStats` de la Partner API, ver §4.6.) |
 | `src/services/giroxPublisherKeys.js` | publisher_admin create-user, panel | Alta de jugadores con la **API key de la campaña** (`Campaign.giroxApiKey`). `createUserAsPublisher`, `testKey`. `invalidateSession()` quedó como **no-op** (no hay sesiones que tirar). |
-| `src/utils/periodRanges.js` | reembolsos, fueguito | Rangos hoy/semana pasada/mes pasado en hora Argentina. Eran funciones de `jugaygana.js`; son PURAS y se movieron acá para que el cliente viejo se pueda borrar. (La de "ayer" se eliminó junto con el reembolso diario, 2026-08-07.) **No tocar los strings de fecha: alimentan los `periodKey` de RefundClaim.** |
+| `src/utils/periodRanges.js` | reembolsos, fueguito | Rangos hoy/semana pasada/mes pasado en hora Argentina. Eran funciones de `jugaygana.js`; son PURAS y se movieron acá para que el cliente viejo se pueda borrar. (La de "ayer" se eliminó el 2026-08-07 y VOLVIÓ con el reembolso diario, #297: `getYesterdayRangeArgentinaEpoch`.) **No tocar los strings de fecha: alimentan los `periodKey` de RefundClaim.** |
 | `scripts/migrate-users-to-girox.js` | one-shot manual | Migración de la base de usuarios (ver §4.7). |
 
 ### 4.2 Qué DESAPARECIÓ (el doc viejo insistía con estas cosas)
@@ -424,21 +427,21 @@ reintento manda la misma reference y la plataforma responde `duplicate:true`.
   `POST /players/{username}/bonus` **ya no se libera solo** — ni con `multiplier: 0`.
   Queda BLOQUEADO hasta que el jugador entre al casino y lo RECLAME (aparece en
   `wagering.claimable`, es el "regalito" del header).
-  ➜ Por eso **reembolsos, ruleta, bono de instalación y comisiones de
-  referidos se acreditan con DEPÓSITO LIBRE** (`creditUserBalance` sin `multiplier`
-  cae en `depositToUser`), no con `/bonus`: si no, el usuario vería el mensaje
-  "¡reembolso acreditado!" y nada en su saldo.
-  **Excepción — FUEGUITO (2026-08-05):** sus premios van con **DEPÓSITO CON
-  `multiplier`** (`girox.depositToUser(..., {multiplier: x})`, x editable en el
-  panel — Config['fireRolloverMultiplier'], default 5): la plata entra al saldo ya
-  (jugable) pero la plataforma exige apostar multiplier × premio para retirarla.
-  Sigue SIN usar `/bonus` (eso requeriría reclamo manual y pisa bonos activos). El
-  viejo requisito de cargas (milestone.requireDeposits) ya NO se chequea al
-  reclamar — quedó reemplazado por el rollover (los campos siguen en la config,
-  ignorados).
-  Sólo se usa `/bonus` si explícitamente se pasa `opts.multiplier`. ⚠️ Y ahí ojo con
-  "bono sobre bono": otorgar un bono a quien ya tiene uno activo PISA el anterior y le
-  debita lo que le quedaba.
+- **Regalos = BONO de 1girox (#266, 2026-09-07) — reemplaza el "depósito libre".**
+  Ruleta (bienvenida/diaria), reembolsos, cashback, fueguito, rakeback, nivel VIP y
+  comisiones de referidos van por **`girox.creditGift()`** → `POST /players/{u}/bonus`
+  con el rollover del flujo (figuran como **Bono** en el panel de 1girox, no como
+  Carga). `creditUserBalance` sin multiplier delega en `creditGift` con rollover 0.
+  - Rollover 0 = bono directo (v1.10: disponible al instante, no pisa nada).
+  - Rollover > 0 PISA a un bono activo → si el jugador tiene bono en curso o sin
+    reclamar (> $50) o el feat no está, `creditGift` cae a **depósito con
+    `multiplier`** (nunca se le debita el bono viejo a nadie). Errores definitivos
+    de `/bonus` (422 / feature_disabled / out_of_range) → depósito; errores de red →
+    el caller reintenta con la MISMA reference.
+  - Al cumplir el rollover el bono queda "a reclamar" → `_autoClaimOnEntry` en
+    `/api/platform/session` (throttle 15 min) y tras cada depósito con bonus.
+  - **NO volver a usar `depositToUser` para regalos.** Las cargas reales siguen por
+    `depositToUser` (con `no_bonus:true` si no llevan bono nuestro).
 - **Rollover GLOBAL de bonos (#278, 2026-09-16):** `Config['bonusRolloverGlobal']`
   `{enabled, x}` (default ON, x3; opciones 0/2/3/5/10; `GET/POST
   /api/admin/bonus-rollover`, card en Configuración). `giroxService.setRolloverResolver`
@@ -482,8 +485,11 @@ salen de la MISMA Partner API, con la misma `X-Api-Key` y por **username**:
   el manual): se trata igual — sin stats.
 
 **La comisión de referidos no viene del proveedor:** 1girox devuelve todos los campos
-`commission` en 0, así que la tasa es NUESTRA: `GIROX_REFERRAL_COMMISSION_PCT`
-(default **8%** del netwin = owner-revenue), y sobre eso va la tasa del referidor.
+`commission` en 0, así que la tasa es NUESTRA. Desde #307 es **3% del netwin del
+referido, directo** (comando `/sys_referidos_pct` en COMANDOS → env
+`GIROX_REFERRAL_COMMISSION_PCT` → default 3; `referralRate.resolveReferralRate()`).
+Los `referralRateOverride` por usuario siguen mandando. No reintroducir la tasa
+encadenada (8% × 7%).
 
 **`giroxUserId`** — el propio `stats` devuelve el ID numérico del jugador y los flujos
 lo persisten "gratis" (update condicional sólo si estaba vacío). Ya NO bloquea nada:
@@ -768,8 +774,8 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   Config['refundPercents'] quedaron `enUso:false` y su card del panel fue
   reemplazada por el editor de rangos. **El RefundClaim se CREA antes de acreditar** (el índice único
   `userId+type+periodKey` es el candado atómico contra doble cobro; si el crédito
-  falla se borra la reserva). El crédito va por `creditUserBalance` = **depósito
-  libre** (no `/bonus`: quedaría a reclamar) con la reference derivada del período.
+  falla se borra la reserva). El crédito va por `creditUserBalance` → `creditGift`
+  (BONO de 1girox, §4.5) con la reference derivada del período.
   Ver #96 y §4.4. ⚠️ En la UI los reembolsos muestran SOLO el % — los nombres
   Bronce/Plata/Oro son del nivel VIP (abajo).
 - **Niveles VIP** (2026-08-03, réplica de Stake): se sube por APOSTADO acumulado de
@@ -777,7 +783,7 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   `src/services/vipLevelService.js`). Escalera en `src/utils/vipLevels.js`: umbrales
   de Stake en USD × `VIP_USD_ARS_RATE` (1500) — Bronce $15M ARS … Diamante V $750.000M.
   Cada nivel destraba: (a) **bono one-time** al alcanzarlo (lo acredita el motor con
-  depósito libre, reference `vip-lvl-<userId>-<idx>`, aviso por chat+push vía
+  `creditGift` (bono, §4.5), reference `vip-lvl-<userId>-<idx>`, aviso por chat+push vía
   `/sys_vip_levelup`; `duplicate:true` = otra instancia ya pagó → no re-notificar) y
   (b) **rakeback semanal**: `POST /api/vip/rakeback/claim` paga `rakebackPct` del
   APOSTADO de casino de la semana pasada (gane o pierda) — mismo patrón de reserva
@@ -789,21 +795,25 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   apagado = no acumula, no paga, la PWA oculta la sección; reactivar recupera todo
   solo porque los buckets se recalculan con `$set`).
 - **Referidos**: preview/calculate (delta incremental sobre ledger de payouts) /
-  payout (acredita con `giroxService.creditUserBalance`, reference
-  `vip-refcom-<payoutId>` reusando el documento de intentos fallidos). El revenue sale
-  del netwin del panel × `GIROX_REFERRAL_COMMISSION_PCT` (8%) y sobre eso la tasa del
-  referidor (7%). Ver §4.6.
-- **Ruleta diaria**: requiere PWA instalada (token FCM standalone) + cliente activo
-  (>10 cargas reales/30d). Pick ponderado + **budget pacing** (distribuye el
-  presupuesto diario por hora ART; si excede → fuerza SIN PREMIO). Auto-crédito con
-  depósito libre (`vip-roulette-<spinId>`); `credit_failed` → retry desde el panel con
-  la MISMA reference.
+  payout (acredita con `giroxService.creditUserBalance`, `ignoreGlobalRollover:true`,
+  reference `vip-refcom-<payoutId>` reusando el documento de intentos fallidos).
+  Comisión = **3% del netwin de casino del referido** (`/sys_referidos_pct`, #307).
+  **Pago AUTOMÁTICO el día 1** (`_runMonthlyReferralPayout`, reserva
+  `Config referral_autorun_<YYYY-MM>`, `adminUsername:'auto-referidos'`); los botones
+  del panel siguen para casos puntuales. Ver §4.6.
+- **Ruleta diaria** (v2, ver "Hub PREMIOS" arriba): gates configurables en
+  `Config['dailyRoulette']` (cargas mínimas en los últimos `depositDays` días, default
+  7 — #306; app instalada), cooldown de 24 h desde el último giro. Pick ponderado +
+  **budget pacing** (si excede → SIN PREMIO). Cash → `creditGift` (bono,
+  `vip-roulette-<spinId>`); `credit_failed` → retry desde el panel con la MISMA
+  reference. % EXTRA → pendiente que vence a las 24 h (#305).
 - **Fueguito**: reclamo diario sin requisitos; premios de hitos (editables en panel,
-  Config['fireMilestones']) exigen actividad de cargas y expiran el mismo día. Crédito
-  con depósito libre (`vip-fire-<userId>-d<día>-<fecha>`).
-- **Bono instalación $5.000**: exige standalone real (token FCM), teléfono verificado,
-  anti-multicuenta por token FCM compartido, reserva atómica. Crédito con depósito libre
-  (`vip-install-<userId>` — una sola vez en la vida del usuario).
+  Config['fireMilestones']) expiran el mismo día. Crédito con `creditGift` + rollover
+  (`vip-fire-<userId>-d<día>-<fecha>`); el requisito de cargas quedó reemplazado por
+  el rollover (#122).
+- **Bono instalación**: NEUTRALIZADO (#234) — el banner quedaba bajo el casino y
+  pisaba el 100% de 1ª carga. `installbonus.js` oculta el banner y `claim()` es no-op.
+  El único bono de bienvenida es el de 1ª carga (automático, con tope #285).
 - **Link de acceso de un solo uso** (2026-08-03): el admin general o un DEPOSITOR
   generan `?acceso=<token>` para un cliente (`POST /api/admin/users/:userId/access-link`,
   también desde el alta del panel; regenerar pisa el anterior). En `User` vive SOLO
@@ -896,7 +906,7 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   rótulo del recuadro muestra la medalla del nivel (`updateDashVipBadge`).
 
 ### Panel admin (`public/adminprivado2026/`)
-- `admin.js` (~12k líneas), auth mixta: login → Bearer en memoria + cookies httpOnly;
+- `admin.js` (~14k líneas), auth mixta: login → Bearer en memoria + cookies httpOnly;
   `checkAdminSession()` (`GET /api/admin/me`) restaura sesión al recargar.
 - Roles: admin ve todo; depositor (abiertos/cerrados); withdrawer (solo Pagos);
   comunidad (abiertos/cerrados/comunidad); **publisher_admin tiene vista propia**
@@ -937,6 +947,9 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 | `_runFcmPrune` | 24 h | activo | flag anti-overlap en memoria |
 | `fbAdsWebhook.startWorker` | 5 min | activo | nextRetryAt |
 | Limpieza mensajes >3d | 6 h | activo (red de seguridad del TTL) | deleteMany |
+| `_processNotifBatchQueue` (lotes con regalo) | 45 s + kick al crear | activo | claim atómico por destinatario (`delivery:null → 'sending'`), reference `vip-nbatch-*` |
+| `_expireDailyRoulettePct` | 15 min (+ lazy en claim/status) | activo — vence el % EXTRA de la ruleta diaria a las 24 h (#305) | update condicional, idempotente |
+| `_runMonthlyReferralPayout` | 1 h (+5 min tras el arranque) | activo — paga referidos del mes anterior el día 1 (#307) | Config `referral_autorun_<YYYY-MM>` con `$setOnInsert` → una sola instancia; servicio incremental |
 
 Migraciones one-shot: patrón flag en Config (`migration_*_done`) en `initializeData()`.
 El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
@@ -955,8 +968,8 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `findUserByUsernameCI` (indexado + fallback), NUNCA regex nuevo.
 - **periodKey**: `YYYY-MM` (referidos y VipWagerMonth); RefundClaim usa
   `weekly:YYYY-MM-DD` / `monthly:YYYY-MM` / `rake:YYYY-MM-DD` (lunes de la
-  semana del rakeback VIP). (`daily:YYYY-MM-DD` sólo en claims históricos: el
-  reembolso diario se eliminó el 2026-08-07.)
+  semana del rakeback VIP) / `daily:YYYY-MM-DD` (día reembolsado — el diario se
+  eliminó el 2026-08-07 y volvió el 2026-09-24, #297).
 - **Montos 1girox: PESOS.** Se envían tal cual (2 decimales), y los balances y el netwin
   del panel vuelven en pesos. **NO multiplicar ni dividir por 100** — el ×100 de
   centavos era de JUGAYGANA y ya no existe.
@@ -990,17 +1003,14 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   saliera del id, el reintento tras un fallo falso pagaría doble).
 - **Retiros: validar contra `available`, no `balance`** — el rollover está activo en
   1girox y parte del saldo puede estar bloqueado (§4.5).
-- **No acreditar regalos con `/bonus`**: desde la v1.7 el bono queda "a reclamar" hasta
-  que el jugador lo agarre en el casino. Reembolsos, ruleta, fueguito, bono de
-  instalación y comisiones van con **depósito libre** (§4.5).
+- **Regalos = `creditGift` (bono), NUNCA `depositToUser`** (#266, §4.5). El fallback a
+  depósito+multiplier lo decide `creditGift` solo (bono activo / feat apagado). Flujos
+  que NO son bono (comisiones, devoluciones de retiro) → `ignoreGlobalRollover:true`.
 - **Rate limit 60/min es POR INSTANCIA** (`GIROX_MAX_RPM`, default 55): con N instancias
   el techo real es N×55. Si aparecen 429, BAJAR el valor (§4.3).
-- **Los reportes NO son la Partner API**: `giroxReportsService` scrapea el panel
-  `admin.1girox.com` con un Bearer de sesión. Es lo más frágil que tenemos y de ahí
-  dependen reembolsos y comisiones de referidos (§4.6). El netwin es **sólo casino**
-  (`GIROX_NETWIN_SCOPE`).
-- **Sin `User.giroxUserId` no hay reembolso ni comisión** para ese usuario. El buscador
-  del panel hace LIKE: la coincidencia tiene que ser EXACTA o se le paga a otro (§4.6).
+- **El netwin sale de la Partner API** (`getPlayerStats` / batch, por username, §4.6) y
+  es **sólo casino** (`GIROX_NETWIN_SCOPE`). `giroxUserId` ya no bloquea nada.
+  ⚠️ `netwin` POSITIVO = el jugador PERDIÓ.
 - **Message TTL 3 días; Transaction permanente.** Snapshot en ChatDelay por eso.
 - **ChatStatus se crea con actividad**, no al crear el usuario.
 - **Atribución de publicista** se fija al registrar; el login NO la cambia. El referido

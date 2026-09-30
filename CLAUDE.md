@@ -44,7 +44,7 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 
 ## Estructura
 
-- `server.js` (~15.7k líneas) — entry point. ~180 rutas, authMiddleware inline (~L2477),
+- `server.js` (~23k líneas) — entry point. ~180 rutas, authMiddleware inline (~L2477),
   Socket.IO (~L7325), motores cron por setInterval (~L14100+), bootstrap async con SSM
   (final del archivo). Comentario dice "en migración" pero en la práctica sigue
   creciendo acá. (Los números de línea derivan con cada cambio — usar grep.)
@@ -72,7 +72,7 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 - `src/services/` — lógica (referidos, notificaciones, otp, metaCapi, fbAds, hgcash,
   comprobantes IA, analítica publicistas…).
 - `public/` — PWA del cliente (namespace global `window.VIP`, SW único
-  `firebase-messaging-sw.js`). `public/adminprivado2026/` — panel admin (~12k líneas
+  `firebase-messaging-sw.js`). `public/adminprivado2026/` — panel admin (~14k líneas
   de admin.js, cookie httpOnly, SW propio `admin-sw.js` con scope /adminprivado2026/).
 
 ## Cosas que NO hay que romper (gotchas)
@@ -165,5 +165,17 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 1. Leer `WORKLOG.md` al iniciar.
 2. Hacer el cambio. Validar sintaxis (`node --check` en archivos tocados — no hay
    node_modules local, así que no se puede correr el server; sólo syntax check).
-3. Actualizar `WORKLOG.md`.
-4. Commitear y pushear a `main` cuando el owner lo pida (o si pidió "todo seguido").
+3. **Docs, SIEMPRE y SIN que el owner lo pida** (lo pidió explícito el 2026-09-30:
+   "que no tenga que decirte qué actualizar"). En el MISMO commit del cambio:
+   - `WORKLOG.md`: entrada nueva arriba (numerada, bajo "Sesión AAAA-MM-DD") + la fecha
+     de "Última actualización" del encabezado.
+   - `docs/ARCHITECTURE.md`: si el cambio toca un flujo, modelo, endpoint, cron,
+     reference `vip-*`, env o trampa → actualizar la sección correspondiente Y corregir
+     lo que el cambio deje viejo (buscar con grep el nombre de la feature en todo el
+     doc, no sólo agregar). Actualizar su "Última actualización".
+   - `CLAUDE.md`: sólo si cambia el contexto de arranque (gotchas de primer nivel,
+     estructura, reglas).
+   - Si al leer algo notás que un doc quedó desactualizado aunque no sea por tu
+     cambio, corregilo igual.
+4. Commitear y pushear a `main` (código + docs juntos). En Tails lo no pusheado se
+   pierde al reiniciar.
