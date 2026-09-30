@@ -2339,7 +2339,7 @@ VIP.ui.casinoBotGo = function(state) {
     // hub PREMIOS en la tarjeta "Invitá y ganá".
     const _rb = VIP.ui._botMsg('<div onclick="VIP.ui._rwInviteFriends()" style="display:flex;align-items:center;gap:9px;cursor:pointer;">' +
       '<span style="font-size:22px;flex:none;">🤝</span>' +
-      '<div style="flex:1;min-width:0;line-height:1.3;"><b style="color:#ff9800;">Invitá amigos y ganá el ' + VIP.ui._rwRefPct() + '%</b> de lo que pierdan jugando, todos los meses.' +
+      '<div style="flex:1;min-width:0;line-height:1.3;"><b style="color:#ff9800;">Invitá amigos y ganá el ' + VIP.ui._rwRefPct() + '%</b> de comisión por su actividad en la sala, todos los meses.' +
       '<div style="font-size:11px;opacity:.8;">Tocá: se copia tu link y elegís por dónde mandarlo 👉</div></div></div>');
     if (!VIP.ui._rwRef) { try { VIP.ui._rwLoadReferrals(); } catch (e) {} } // precargar el link
     if (_rb) { _rb.style.border = '1px solid rgba(255,152,0,0.55)'; _rb.style.background = 'linear-gradient(135deg,rgba(255,152,0,0.12),rgba(255,152,0,0.04))'; }
@@ -3340,7 +3340,7 @@ VIP.ui._rwInviteFriends = function() {
   const oldRow = document.getElementById('botInviteRow'); if (oldRow) oldRow.remove();
   const b = VIP.ui._botMsg('✅ <b>Link copiado</b> — ya lo podés pegar donde quieras.<br>' +
     '<div class="cwBox" style="border-radius:9px;padding:7px 9px;margin-top:6px;font-size:11.5px;font-family:monospace;word-break:break-all;">' + _wrEsc(me.referralLink) + '</div>' +
-    '<div style="margin-top:6px;">¿Cómo querés invitarlos? Cobrás el <b>' + VIP.ui._rwRefPct() + '%</b> de lo que pierdan, todos los meses.</div>');
+    '<div style="margin-top:6px;">¿Cómo querés invitarlos? Cobrás el <b>' + VIP.ui._rwRefPct() + '%</b> de comisión por su actividad, todos los meses.</div>');
   if (b) b.id = 'botInviteBlock';
   const hasShare = (function() { try { return !!navigator.share; } catch (e) { return false; } })();
   VIP.ui._botRow(
@@ -3363,7 +3363,7 @@ VIP.ui._rwReferralCard = function() {
   if (!ref) { VIP.ui._rwLoadReferrals(); }
   const me = (ref && ref.me) || null, sum = (ref && ref.sum) || null;
   const head = '<div style="font-size:13.5px;color:#fff;line-height:1.45;margin-bottom:8px;">Compartí tu link: cada amigo que se registre con él es <b>tu referido</b>, y vos cobrás ' +
-    '<b style="color:' + acc + ';">el ' + pct + '% de lo que pierdan jugando</b>, <b>todos los meses</b>, directo a tu saldo. Sin límite de amigos. 🚀</div>';
+    '<b style="color:' + acc + ';">una comisión del ' + pct + '% por su actividad</b>, <b>todos los meses</b>, directo a tu saldo. Sin límite de amigos. 🚀</div>';
   let body;
   if (!ref) {
     body = head + '<div style="font-size:12.5px;color:#9aa4b0;">⏳ Cargando tu link…</div>';
@@ -3394,7 +3394,7 @@ VIP.ui._rwReferralCard = function() {
       '</div>' +
       '<div style="font-size:11px;color:#9aa4b0;margin-top:8px;text-align:center;">💸 Se paga solo el <b style="color:#fff;">1 de cada mes</b>' + (sum && sum.lastPayout && sum.lastPayout.amount > 0 ? ' · último pago <b style="color:#fff;">' + _rwFmt(sum.lastPayout.amount) + '</b>' : '') + '</div>';
   }
-  return '<div id="rwRefCard">' + _rwCard({ icon: '🤝', accent: acc, title: 'Invitá y ganá', subtitle: 'El ' + pct + '% de lo que pierdan tus referidos, cada mes', body: body, cta: '' }) + '</div>';
+  return '<div id="rwRefCard">' + _rwCard({ icon: '🤝', accent: acc, title: 'Invitá y ganá', subtitle: 'Comisión del ' + pct + '% por la actividad de tus referidos, cada mes', body: body, cta: '' }) + '</div>';
 };
 
 VIP.ui.openRewardsHub = function(focus) {
@@ -3579,7 +3579,7 @@ VIP.ui.openRewardsHub = function(focus) {
       (secBonos ? sec('bonos', '#26e07f', '🎁 CÓMO FUNCIONAN LOS BONOS', secBonos) : '') +
       sec('referidos', '#ff9800', '🤝 CÓMO FUNCIONAN LOS REFERIDOS',
         li('🔗', 'Compartí <b style="color:#fff;">tu link</b> (está en la tarjeta "Invitá y ganá"). El que se registra con él queda como <b style="color:#fff;">tu referido</b> para siempre.') +
-        li('💰', 'Cada mes cobrás el <b style="color:#ff9800;">' + VIP.ui._rwRefPct() + '%</b> de lo que tus referidos <b style="color:#fff;">pierdan jugando</b> (slots y casino). Cuantos más amigos, más cobrás — sin tope.') +
+        li('💰', 'Cada mes cobrás una <b style="color:#fff;">comisión del <span style="color:#ff9800;">' + VIP.ui._rwRefPct() + '%</span></b> por la actividad de tus referidos en la sala. Cuantos más amigos invites, más cobrás — sin tope.') +
         li('📅', 'Se acredita <b style="color:#fff;">solo, el 1 de cada mes</b>, directo a tu saldo y sin rollover: lo podés jugar o retirar al instante.') +
         li('📊', 'En la tarjeta ves tus referidos activos, lo que ya cobraste y lo estimado del mes en curso.')) +
     '</div>';

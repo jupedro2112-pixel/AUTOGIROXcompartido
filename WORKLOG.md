@@ -8,6 +8,17 @@
 
 ## Sesión 2026-09-30
 
+### 314. Referidos: textos sin "lo que pierdan jugando" (comisión por actividad)
+- Owner (captura del banner del asistente): "queda chocante que diga que ganan el 3% de
+  lo que pierden sus amigos". Todos los textos al CLIENTE pasan a "comisión del X% por
+  la actividad de tus referidos": banner del inicio del asistente, mensaje tras copiar
+  el link, tarjeta "Invitá y ganá" de PREMIOS (encabezado + subtítulo) e INFORMACIÓN →
+  "Cómo funcionan los referidos" (ui.js). El % sigue saliendo de `/sys_referidos_pct`.
+- Dashboard viejo / modal "Mis Referidos" / Información del servicio (index.html):
+  decían "8%" hardcodeado (stale desde #307) y "si tus referidos pierden $100.000…" →
+  pasan a "comisión mensual por su actividad" SIN número fijo (así no se desactualizan
+  si cambia el % en COMANDOS). Cálculo sin cambios. SW → v190. Solo front.
+
 ### 313. Docs al día + regla: el asistente los actualiza SOLO en cada cambio
 - Owner: "que se vaya actualizando a medida que haya cosas nuevas, que no tenga que
   decirte qué actualizar en architecture, worklog y claude". Regla reforzada en

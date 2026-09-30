@@ -964,6 +964,9 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   Variables globales (#281): `{rollover}` / `{rollover_txt}` (rollover efectivo del
   panel); con `opts.bonus:true` la frase se agrega sola si el comando no la tiene
   (`{rollover_off}` la evita). `applyRolloverVars()` para los mensajes armados a mano.
+- **Copy de referidos al cliente** (#314): hablar de "comisión del X% por la actividad
+  de tus referidos", NUNCA "de lo que pierdan" (decisión del owner: queda chocante). El
+  % en JS sale de `VIP.ui._rwRefPct()`; en HTML estático NO poner número (se desactualiza).
 - **Identidad**: `user.id` (uuid), no `_id`. Username case-insensitive →
   `findUserByUsernameCI` (indexado + fallback), NUNCA regex nuevo.
 - **periodKey**: `YYYY-MM` (referidos y VipWagerMonth); RefundClaim usa
