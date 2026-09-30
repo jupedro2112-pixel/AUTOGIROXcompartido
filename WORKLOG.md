@@ -8,6 +8,22 @@
 
 ## Sesión 2026-09-30
 
+### 312. "Volvieron por pauta": etiqueta en las DOS cuentas + sección del panel
+- Owner: que la cuenta nueva también quede etiquetada cuando reemplaza a una vieja (para
+  contar cuántos "nuevos" son reemplazos), y una sección para ver a los que iban a
+  entrar por una pauta pero ya eran clientes (de qué publicista venían y por cuál
+  volvieron). Aclaración: si elige la VIEJA, la sesión vieja NO se cierra (sigue tal
+  cual; la nueva se desactiva).
+- Etiquetas: eligió la NUEVA → nueva `reemplazo` (+ `replacesUserId/Username`, campos
+  nuevos) y vieja `reemplazada` (#309b). Eligió la VIEJA → nueva `duplicado-landing`
+  (#309) y vieja **`volvio-por-pauta`** (nuevo). `campaignReturnAt` en la nueva en ambos
+  casos.
+- `GET /api/admin/campaign-returns?days=30`: filas {cuándo, nueva {username, publicista/
+  campaña}, vieja {username, publicista, desde}, eligió, cargó después (cargas de la cuenta
+  que quedó activa desde la decisión)}, `summary` y `byPublisher` (por la pauta por la que
+  volvieron). Panel (admin-sw v66): nav "🔁 Volvieron por pauta" (debajo de Cuentas
+  sospechosas) con cards, resumen por publicista y tabla; selector 7/30/90/365 días.
+
 ### 311. Lotes con regalo: tope del % · el bono canjeado vence a las 24 h · resumen por lote (réplica de #172/#173 del gemelo JUGAYGANA)
 - Paquete `~/Documents/AUTOREEMBOLSOSjygactivo/docs/replicas/README-2026-09-29-lotes.md` +
   `.patch`, portado a 1girox (sin tocar el camino de acreditación: sigue por

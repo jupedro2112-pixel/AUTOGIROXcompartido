@@ -18025,10 +18025,12 @@ app.post('/api/auth/access-link/discard', authLimiter, authMiddleware, async (re
     let pub = null;
     try { const c = cand.acquisitionCampaign ? await Campaign.findOne({ code: cand.acquisitionCampaign }).select('publisher').lean() : null; pub = c && c.publisher; } catch (_) {}
     await User.updateOne({ id: cand.id }, {
-      $set: { isActive: false, accessLinkHash: null, duplicateOfUserId: oldId,
+      $set: { isActive: false, accessLinkHash: null, duplicateOfUserId: oldId, campaignReturnAt: new Date(),
               blockReason: `Duplicado de landing: el cliente eligió seguir con @${oldUsername} (${new Date().toISOString().slice(0, 10)})` },
       $addToSet: { tags: 'duplicado-landing' }
     });
+    // #312: la cuenta VIEJA también queda marcada (volvió por una pauta y se quedó).
+    await User.updateOne({ id: oldId }, { $addToSet: { tags: 'volvio-por-pauta' } }).catch(() => {});
     try { await ChatStatus.updateOne({ userId: cand.id }, { $set: { status: 'closed' } }); } catch (_) {}
     try {
       await _emitAdminOnlyChatNote(oldId, oldUsername,
@@ -18063,6 +18065,11 @@ app.post('/api/auth/account-replaced', authLimiter, authMiddleware, async (req, 
               blockReason: `Reemplazada por @${newU.username}: el cliente eligió la cuenta nueva al entrar por una pauta (${new Date().toISOString().slice(0, 10)})` },
       $addToSet: { tags: 'reemplazada' }
     });
+    // #312: la NUEVA queda marcada como reemplazo (no es un cliente nuevo de la pauta).
+    await User.updateOne({ id: newU.id }, {
+      $set: { replacesUserId: oldU.id, replacesUsername: oldU.username, campaignReturnAt: new Date() },
+      $addToSet: { tags: 'reemplazo' }
+    }).catch(() => {});
     try { await ChatStatus.updateOne({ userId: oldU.id }, { $set: { status: 'closed' } }); } catch (_) {}
     try {
       await _emitAdminOnlyChatNote(oldU.id, oldU.username, `🔁 Cuenta REEMPLAZADA: el cliente entró por una pauta y eligió seguir con la cuenta nueva @${newU.username}. Esta quedó bloqueada; si entra con esta, el login le dice que use @${newU.username}.`);
@@ -18072,6 +18079,65 @@ app.post('/api/auth/account-replaced', authLimiter, authMiddleware, async (req, 
     res.json({ success: true, replaced: oldU.username });
   } catch (e) {
     logger.warn(`[access-link] account-replaced falló: ${e.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// #312 (owner 2026-09-30): "VOLVIERON POR PAUTA" — clientes que ya tenían cuenta y
+// entraron por un link de pauta (la landing les creó otra). Lista los dos casos:
+//   • eligió la NUEVA → nueva con `replacesUserId` (tag 'reemplazo'); vieja bloqueada
+//     (tag 'reemplazada').
+//   • eligió la VIEJA → nueva desactivada con `duplicateOfUserId` (tag
+//     'duplicado-landing'); vieja con tag 'volvio-por-pauta'.
+// Con el publicista/campaña de la cuenta nueva (por dónde volvió) y de la vieja (de
+// dónde venía), para ver qué pautas traen clientes que ya eran de otro publicista.
+app.get('/api/admin/campaign-returns', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+    const since = new Date(Date.now() - days * 24 * 3600 * 1000);
+    const nuevas = await User.find({
+      $or: [{ replacesUserId: { $ne: null } }, { duplicateOfUserId: { $ne: null } }],
+      $and: [{ $or: [{ campaignReturnAt: { $gte: since } }, { campaignReturnAt: null, createdAt: { $gte: since } }] }]
+    }).select('id username createdAt campaignReturnAt replacesUserId duplicateOfUserId acquisitionCampaign acquisitionSource').sort({ campaignReturnAt: -1, createdAt: -1 }).limit(1000).lean();
+    const oldIds = nuevas.map(n => n.replacesUserId || n.duplicateOfUserId).filter(Boolean);
+    const viejas = await User.find({ id: { $in: oldIds } }).select('id username createdAt acquisitionCampaign acquisitionSource balance').lean();
+    const vMap = new Map(viejas.map(v => [v.id, v]));
+    const codes = [...new Set([...nuevas, ...viejas].map(u => u.acquisitionCampaign).filter(Boolean))];
+    const camps = codes.length ? await Campaign.find({ code: { $in: codes } }).select('code publisher name').lean() : [];
+    const cMap = new Map(camps.map(c => [c.code, c]));
+    const pub = (u) => { const c = u && u.acquisitionCampaign ? cMap.get(u.acquisitionCampaign) : null; return c ? (c.publisher || c.name || u.acquisitionCampaign) : (u && u.acquisitionSource === 'landing' ? 'landing (sin campaña)' : (u && u.acquisitionSource === 'manual' ? 'alta manual' : 'orgánico')); };
+    // ¿Cargó después de la decisión? (solo la cuenta que quedó activa)
+    const activeIds = nuevas.map(n => n.replacesUserId ? n.id : n.duplicateOfUserId).filter(Boolean);
+    const deps = activeIds.length ? await Transaction.aggregate([
+      { $match: { userId: { $in: activeIds }, type: 'deposit', 'metadata.source': { $ne: 'payout_refund' }, timestamp: { $gte: since } } },
+      { $group: { _id: '$userId', n: { $sum: 1 }, total: { $sum: '$amount' } } }
+    ]) : [];
+    const dMap = new Map(deps.map(d => [d._id, d]));
+    const rows = nuevas.map(n => {
+      const eligioNueva = !!n.replacesUserId;
+      const vieja = vMap.get(n.replacesUserId || n.duplicateOfUserId) || null;
+      const activaId = eligioNueva ? n.id : (vieja && vieja.id);
+      const d = activaId ? dMap.get(activaId) : null;
+      return {
+        at: n.campaignReturnAt || n.createdAt,
+        decision: eligioNueva ? 'nueva' : 'vieja',
+        nueva: { id: n.id, username: n.username, publisher: pub(n), campaign: n.acquisitionCampaign || null },
+        vieja: vieja ? { id: vieja.id, username: vieja.username, publisher: pub(vieja), campaign: vieja.acquisitionCampaign || null, createdAt: vieja.createdAt } : null,
+        cargoDespues: d ? { n: d.n, total: d.total } : null
+      };
+    });
+    const summary = {
+      total: rows.length,
+      eligieronNueva: rows.filter(r => r.decision === 'nueva').length,
+      eligieronVieja: rows.filter(r => r.decision === 'vieja').length,
+      cargaron: rows.filter(r => r.cargoDespues).length
+    };
+    // Por publicista de la pauta por la que VOLVIERON.
+    const byPub = {};
+    for (const r of rows) { const k = r.nueva.publisher || '—'; byPub[k] = byPub[k] || { publisher: k, total: 0, nueva: 0, vieja: 0 }; byPub[k].total++; byPub[k][r.decision]++; }
+    res.json({ days, summary, byPublisher: Object.values(byPub).sort((a, b) => b.total - a.total), rows });
+  } catch (e) {
+    logger.warn(`[campaign-returns] ${e.message}`);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });

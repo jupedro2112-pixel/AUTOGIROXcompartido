@@ -5080,6 +5080,7 @@ function switchSection(section) {
     if (section === 'centralAppUsers') loadCentralAppUsers();
     if (section === 'centralWelcomeBonus') loadCentralWelcomeBonus();
     if (section === 'suspiciousAccounts') loadSuspiciousAccounts();
+    if (section === 'campaignReturns') loadCampaignReturns(); // #312
     if (section === 'reembolsos') loadReembolsos();
     if (section === 'chatDelays') loadChatDelays();
     if (section === 'reviews') loadReviews();
@@ -10613,6 +10614,58 @@ async function loadCentralWelcomeBonus() {
 // --- Cuentas sospechosas (anti-multicuenta) ---
 let _suspiciousData = { byPhone: [], byIp: [], byFcmToken: [], summary: {} };
 let _suspiciousTab = 'phone';
+
+// #312: sección "🔁 Volvieron por pauta".
+async function loadCampaignReturns() {
+    const body = document.getElementById('campaignReturnsBody');
+    if (!body) return;
+    body.innerHTML = '<div style="color:#aaa;text-align:center;padding:24px;">⏳ Cargando…</div>';
+    try {
+        const days = (document.getElementById('campaignReturnsDays') || {}).value || 30;
+        const r = await authFetch('/api/admin/campaign-returns?days=' + encodeURIComponent(days));
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || 'Error');
+        const sm = j.summary || {};
+        const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR');
+        const card = (lbl, val, color) => '<div style="background:rgba(0,0,0,0.30);border:1px solid ' + color + '55;border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">' + lbl + '</div><div style="color:' + color + ';font-size:22px;font-weight:900;margin-top:2px;">' + val + '</div></div>';
+        let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:14px;">' +
+            card('Volvieron por pauta', sm.total || 0, '#ffd700') +
+            card('Eligieron la NUEVA', sm.eligieronNueva || 0, '#7c5cff') +
+            card('Se quedaron con la VIEJA', sm.eligieronVieja || 0, '#26e07f') +
+            card('Cargaron después', sm.cargaron || 0, '#4dd0ff') + '</div>';
+        const bp = j.byPublisher || [];
+        if (bp.length) {
+            html += '<h3 style="color:#ffd700;font-size:12px;margin:10px 0 8px;letter-spacing:1.5px;text-transform:uppercase;">📣 Por publicista de la pauta por la que volvieron</h3>' +
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">' +
+                bp.map(p => '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:8px 12px;"><div style="color:#fff;font-weight:900;font-size:13px;">' + escapeHtml(p.publisher) + '</div><div style="color:#ddd;font-size:11px;">' + p.total + ' volvieron · <span style="color:#7c5cff;">' + p.nueva + ' nueva</span> · <span style="color:#26e07f;">' + p.vieja + ' vieja</span></div></div>').join('') + '</div>';
+        }
+        const rows = j.rows || [];
+        if (!rows.length) {
+            html += '<div class="empty-state"><p>Nadie volvió por una pauta en este período.</p></div>';
+        } else {
+            html += '<div style="background:rgba(0,0,0,0.20);border-radius:8px;overflow:auto;"><table style="width:100%;border-collapse:collapse;font-size:11.5px;">' +
+                '<thead><tr style="background:rgba(255,215,0,0.08);color:#ffd700;text-align:left;">' +
+                '<th style="padding:8px 10px;">Cuándo</th><th style="padding:8px 10px;">Cuenta NUEVA (por dónde volvió)</th><th style="padding:8px 10px;">Cuenta VIEJA (de dónde venía)</th><th style="padding:8px 10px;">Eligió</th><th style="padding:8px 10px;">Cargó después</th></tr></thead><tbody>';
+            for (const r of rows) {
+                const n = r.nueva || {}, v = r.vieja || {};
+                const eligio = r.decision === 'nueva'
+                    ? '<span style="background:rgba(124,92,255,0.2);color:#b9a6ff;border:1px solid #7c5cff;border-radius:5px;padding:2px 7px;font-size:10px;font-weight:800;">🆕 la NUEVA</span>'
+                    : '<span style="background:rgba(38,224,127,0.15);color:#26e07f;border:1px solid #26e07f;border-radius:5px;padding:2px 7px;font-size:10px;font-weight:800;">↩ la VIEJA</span>';
+                html += '<tr style="border-top:1px solid rgba(255,255,255,0.05);">' +
+                    '<td style="padding:7px 10px;color:#aaa;white-space:nowrap;">' + escapeHtml(fmtFechaHoraAR(r.at)) + '</td>' +
+                    '<td style="padding:7px 10px;"><b style="color:#fff;">' + escapeHtml(n.username || '?') + '</b>' + (r.decision === 'vieja' ? ' <span style="color:#888;font-size:10px;">(desactivada)</span>' : '') + '<div style="color:#b9a6ff;font-size:10.5px;">📣 ' + escapeHtml(n.publisher || '—') + '</div></td>' +
+                    '<td style="padding:7px 10px;"><b style="color:#fff;">' + escapeHtml(v.username || '?') + '</b>' + (r.decision === 'nueva' ? ' <span style="color:#888;font-size:10px;">(bloqueada)</span>' : '') + '<div style="color:#26e07f;font-size:10.5px;">📣 ' + escapeHtml(v.publisher || '—') + (v.createdAt ? ' · desde ' + escapeHtml(fmtFechaHoraAR(v.createdAt).slice(0, 5)) : '') + '</div></td>' +
+                    '<td style="padding:7px 10px;">' + eligio + '</td>' +
+                    '<td style="padding:7px 10px;color:' + (r.cargoDespues ? '#4dd0ff' : '#666') + ';font-weight:700;">' + (r.cargoDespues ? r.cargoDespues.n + ' carga(s) · ' + money(r.cargoDespues.total) : '—') + '</td></tr>';
+            }
+            html += '</tbody></table></div>';
+        }
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<div class="empty-state"><p>❌ ' + _centEsc(e.message) + '</p></div>';
+    }
+}
+window.loadCampaignReturns = loadCampaignReturns;
 
 async function loadSuspiciousAccounts() {
     const body = document.getElementById('suspiciousAccountsBody');

@@ -645,9 +645,12 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   pruebas (#293): `POST /api/admin/roulette/reset-user` `{userId|username, welcome,
   daily}` (solo admin general) → bienvenida a `'none'` + borra el giro de HOY de la
   diaria; emite `rewards_changed` al cliente. No devuelve lo ya acreditado.
-- **Link de landing con otra sesión en el celular (#309):** la PWA pregunta con cuál
-  seguir; "seguir con la vieja" → `POST /api/auth/access-link/discard` desactiva la
-  cuenta nueva de landing (`duplicateOfUserId`, tag `duplicado-landing`).
+- **Link de landing con otra sesión en el celular (#309/#309b/#312):** la PWA pregunta
+  con cuál seguir; "seguir con la vieja" → `POST /api/auth/access-link/discard` desactiva
+  la cuenta nueva (`duplicateOfUserId`, tag `duplicado-landing`; vieja tag
+  `volvio-por-pauta`); "la nueva" → `POST /api/auth/account-replaced` bloquea la vieja
+  (`replacedBy*`, tag `reemplazada`) y marca la nueva (`replacesUserId`, tag `reemplazo`).
+  Listado: `GET /api/admin/campaign-returns` → panel "🔁 Volvieron por pauta".
 - **Dos formas de cargar (#295).** `User.depositMode` `'auto'|'manual'|null`. El widget
   pregunta al primer "Depositar" (`casinoBotGo('deposit-mode')`); `auto` = tarjeta CBU +
   comprobante (pipeline IA/hgcash); `manual` = `casinoBotManualDeposit()` monta el chat

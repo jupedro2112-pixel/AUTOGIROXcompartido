@@ -145,6 +145,10 @@ document.addEventListener('change', function (ev) {
                     <span>🕵️</span>
                     <span>Cuentas sospechosas</span>
                 </a>
+                <a href="#" class="nav-item" data-section="campaignReturns" id="campaignReturnsNavItem">
+                    <span>🔁</span>
+                    <span>Volvieron por pauta</span>
+                </a>
                 <div class="nav-group-title" style="padding:13px 16px 5px;font-size:9.5px;font-weight:900;letter-spacing:1.2px;color:#d4af37;text-transform:uppercase;opacity:.7;">Reembolsos</div>
                 <a href="#" class="nav-item" data-section="reembolsos">
                     <span>💸</span>
@@ -1337,6 +1341,24 @@ document.addEventListener('change', function (ev) {
             <!-- ============================================================
                  CUENTAS SOSPECHOSAS — grupos por phone / IP / fcmToken
                  ============================================================ -->
+            <!-- #312: clientes que ya tenían cuenta y entraron por un link de pauta -->
+            <section id="campaignReturnsSection" class="section">
+                <div class="panel-header">
+                    <h2>🔁 Volvieron por pauta</h2>
+                    <button class="refresh-btn" onclick="loadCampaignReturns()" title="Refrescar">🔄</button>
+                </div>
+                <div style="background:rgba(212,175,55,0.06);border:1px solid rgba(212,175,55,0.30);border-radius:10px;padding:12px;margin-bottom:14px;">
+                    <p style="margin:0;color:#bbb;font-size:11.5px;line-height:1.6;">Clientes que <strong>ya tenían cuenta</strong> en este celular y entraron por un <strong>link de pauta</strong> (la landing les creó otra cuenta). La app les preguntó con cuál seguir: <strong>eligieron la nueva</strong> (la vieja quedó bloqueada, etiquetas <code>reemplazo</code> / <code>reemplazada</code>) o <strong>se quedaron con la vieja</strong> (la nueva quedó desactivada, etiquetas <code>duplicado-landing</code> / <code>volvio-por-pauta</code>). Se ve por qué publicista <strong>volvieron</strong> y de qué publicista <strong>venían</strong>, y si cargaron después. Sirve para descontar de los "nuevos" de cada pauta a los que en realidad ya eran clientes.</p>
+                </div>
+                <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;flex-wrap:wrap;">
+                    <label style="color:#bbb;font-size:11.5px;display:flex;align-items:center;gap:6px;">Últimos
+                        <select id="campaignReturnsDays" onchange="loadCampaignReturns()" style="background:#1a1a2e;color:#fff;border:1px solid #444;border-radius:6px;padding:4px 6px;">
+                            <option value="7">7 días</option><option value="30" selected>30 días</option><option value="90">90 días</option><option value="365">1 año</option>
+                        </select>
+                    </label>
+                </div>
+                <div id="campaignReturnsBody"><div style="color:#aaa;text-align:center;padding:24px;">⏳ Cargando…</div></div>
+            </section>
             <section id="suspiciousAccountsSection" class="section">
                 <div class="panel-header">
                     <h2>🕵️ Cuentas sospechosas</h2>

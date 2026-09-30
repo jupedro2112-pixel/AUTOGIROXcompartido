@@ -399,6 +399,13 @@ const userSchema = new mongoose.Schema({
   // Queda bloqueada y el login le dice con qué usuario tiene que entrar ahora.
   replacedByUserId: { type: String, default: null },
   replacedByUsername: { type: String, default: null },
+  // #312: la cuenta NUEVA (de landing) que REEMPLAZÓ a una vieja (el cliente eligió la
+  // nueva). Tag 'reemplazo'. Sirve para contar cuántos "nuevos" de una pauta son en
+  // realidad clientes viejos que volvieron.
+  replacesUserId: { type: String, default: null, index: true },
+  replacesUsername: { type: String, default: null },
+  // #312: fecha de la decisión (en cualquiera de los dos casos: descartada o reemplazo).
+  campaignReturnAt: { type: Date, default: null, index: true },
   // true = la cuenta la creó UN AGENTE desde el panel (admin general, depositor
   // o publisher_admin), NO el propio cliente registrándose. Lo usan los gates
   // que distinguen auto-registro de alta asistida (ej. el bono de instalación
