@@ -223,7 +223,12 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   `GET /api/admin/notif-batches` (+ `/:id` con estado del bono por usuario, leído
   del PromoBonus). Panel: cards "🎁 Lote con regalo" y "📤 Lotes enviados" en
   Notificaciones. El depósito con bonus marca el PromoBonus activo como usado
-  automáticamente (ya existía), aplica también a los de lote.
+  automáticamente (ya existía), aplica también a los de lote. **#311:** el % del lote
+  automático respeta el tope del bono de 1ª carga (`_loteBonusAmount`: tope×pct +
+  excedente×min(pct, restPct); `_loteCapTxt` en notas/cartel/regalo); en modo código el
+  PromoBonus vence a `canje + NotifBatch.useHours` (default 24 h); `GET /notif-batches`
+  suma usados/activos/vencidos por lote y `/:id` devuelve `outcome` + `summary`; franja
+  con minuto HASTA inclusive; código ajeno → "no es para tu cuenta".
 - **DailyRouletteSpin** — 1 giro/día (índices únicos userId+dateKey y
   username+dateKey). Auto-crédito en 1girox; `credit_failed` → retry desde panel.
 - **Datos 2.0** (2026-08-10, sin modelo nuevo): `GET /api/admin/datos2?days=7..90`

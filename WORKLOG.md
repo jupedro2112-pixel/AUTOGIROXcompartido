@@ -6,6 +6,47 @@
 >
 > **Última actualización: 2026-09-24**
 
+## Sesión 2026-09-30
+
+### 311. Lotes con regalo: tope del % · el bono canjeado vence a las 24 h · resumen por lote (réplica de #172/#173 del gemelo JUGAYGANA)
+- Paquete `~/Documents/AUTOREEMBOLSOSjygactivo/docs/replicas/README-2026-09-29-lotes.md` +
+  `.patch`, portado a 1girox (sin tocar el camino de acreditación: sigue por
+  `depositToUser` con `bonusAmount`/`bonusMultiplier` del lote). Mismos nombres de funciones,
+  campos y endpoints que el gemelo; la config del tope es la de este repo
+  (`firstChargeBonus`: `capEnabled/capArs $5.000/restPct 20`, #285).
+- **Tope del % de lote:** `_loteBonusAmount(amount, pct, cfg)` = min(carga, tope)×pct% +
+  max(0, carga−tope)×min(pct, restPct)% (probado: 100%/$10.000→$6.000, 50%→$3.500,
+  20%→$2.000, sin tope→$10.000). Se usa SOLO para el lote automático en hgcash
+  (`_loteHgBonus`) y en `/api/admin/deposit` (`_lotePct`); ruleta y 1ª carga siguen con
+  `computeAutoBonus` (#285, que topea solo el 100%). `_loteCapTxt(pct, cfg)` → " (100%
+  hasta $5.000, el resto al 20%)" ('' si pct ≤ restPct o sin tope) en la nota interna
+  "🎁 LOTE: se aplicó AUTOMÁTICO…" (ambos caminos), en `_giftLabelOf` (solo applyMode auto)
+  y en `GET /api/admin/promo-bonus` (`capTxt`, mostrado en el cartel automático y en el
+  verde). `_fcbCfgCache` = última config leída (para los textos sync); el POST de lotes la
+  refresca antes de armar los textos.
+- **Franja horaria:** `_inDailyWindow` → minuto HASTA inclusive (`m <= toMin`).
+- **Código ajeno:** `_tryClaimNotifBatchCode` → "Este código no es para tu cuenta: el lote
+  se envió a otros usuarios."
+- **Vence a las 24 h del canje:** `NotifBatch.useHours` (default 24, 1–168; input
+  `giftBatchUseHours` "⏱ Horas para usarlo tras canjear", solo con código + %).
+  `_activateBatchPromoBonus`: `expiresAt = mode 'code' ? canje + useHours : batch.expiresAt`.
+  El canje dice "Válido hasta" con `pb.expiresAt`; la notificación del código con % agrega
+  "y, una vez canjeado, tenés Xhs para usarlo en tu carga". Modo "por tiempo" no cambia.
+- **Resumen por lote:** `GET /api/admin/notif-batches` proyecta `useHours` y suma por lote
+  (aggregate de PromoBonus `sourceRuleCode:'lote'`) `usados/activos/vencidos/bonoTotal`;
+  `GET /:id` vence lazy (`updateMany active + expiresAt ≤ ahora → expired`) y devuelve por
+  destinatario `outcome` (used|active|expired|cancelled), `bonusExpiresAt`, `cargaMonto` +
+  `summary {total, canjearon, usaron, activos, vencidos, cancelados, bonoTotal}`. Panel
+  (admin-sw v65): fila "N cargaron ($X) · N activos · N vencidos sin usar · ⏱ Nhs para
+  usar" (solo % ) y "Ver lote" con el resumen y textos por fila ("canjeó … · cargó con el
+  bono … · carga $X · bono $Y · lo aplicó Z" / "activo · vence …" / "venció sin usar" /
+  "cancelado o reemplazado").
+- **Probado:** `node --check` en todo, scan TDZ limpio, helpers de tope con casos de
+  ejemplo. **Falta probar en prod (checklist del README):** lote 100% + carga $30.000 con
+  tope $5.000 → bono $10.000 (5.000 + 25.000×20%); código + % con 1 h → "Válido hasta" a la
+  hora y "venció sin usar" pasada la hora; franja 18:50–18:52 con carga a las 18:52:30;
+  canje con cuenta fuera de la lista. Sin bump de la PWA.
+
 ## Sesión 2026-09-29
 
 ### 309b. Si elige la cuenta NUEVA, la vieja se bloquea con motivo y el login le dice cuál usar

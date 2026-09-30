@@ -11543,7 +11543,7 @@ async function loadChatPromoBonus(username) {
             el.style.background = 'linear-gradient(90deg,#0b6e8f,#084d66)';
             el.innerHTML = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:#fff;">' +
                 '<span style="font-size:18px;">⚡</span>' +
-                '<div style="flex:1;min-width:120px;"><strong style="font-size:13px;">BONO AUTOMÁTICO: +' + b.percent + '% ' + alcance + '</strong>' +
+                '<div style="flex:1;min-width:120px;"><strong style="font-size:13px;">BONO AUTOMÁTICO: +' + b.percent + '% ' + alcance + escapeHtml(b.capTxt || '') + '</strong>' +
                 '<div style="font-size:11px;opacity:0.9;">Se suma SOLO al cargar (transferencia automática o carga manual sin bonus) — NO hay que marcar nada · ' + (b.rolloverX != null ? (b.rolloverX > 0 ? 'rollover x' + b.rolloverX : 'sin rollover') : 'rollover global') + ' · Vence en ' + minsTxt + ' · ' + origen + '</div></div>' +
                 '<button onclick="markChatPromoBonusUsed(\'' + b.id + '\', true)" style="background:rgba(255,255,255,0.85);color:#7a1f1f;border:none;border-radius:7px;padding:6px 11px;font-weight:800;font-size:11.5px;cursor:pointer;">✕ Cancelar bono</button>' +
                 '</div>';
@@ -11551,7 +11551,7 @@ async function loadChatPromoBonus(username) {
         }
         const tituloBono = esFijo
             ? 'REGALO PENDIENTE: $' + Number(b.montoFijoARS).toLocaleString('es-AR') + ' — sumáselo en su próxima carga'
-            : 'BONO VIGENTE: ' + b.percent + '% en la carga';
+            : 'BONO VIGENTE: ' + b.percent + '% en la carga' + escapeHtml(b.capTxt || '');
         el.style.background = 'linear-gradient(90deg,#0f8a2f,#0a6b25)';
         el.innerHTML = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:#fff;">' +
             '<span style="font-size:18px;">🎁</span>' +
@@ -11702,6 +11702,10 @@ function updateGiftBatchModeUI() {
     const mode = document.querySelector('input[name="giftBatchMode"]:checked');
     const wrap = document.getElementById('giftBatchCodeWrap');
     if (wrap) wrap.style.display = (mode && mode.value === 'window') ? 'none' : '';
+    // #311 las horas para usar el bono tras canjear solo aplican con código + %
+    const uh = document.getElementById('giftBatchUseHoursWrap');
+    const tipo = (document.querySelector('input[name="giftBatchType"]:checked') || {}).value || 'percent';
+    if (uh) uh.style.display = (mode && mode.value === 'window') || tipo !== 'percent' ? 'none' : '';
     updateGiftBatchTypeUI();
 }
 
@@ -11964,6 +11968,7 @@ async function sendGiftBatch() {
             method: 'POST',
             body: JSON.stringify({
                 mode, giftType, amount, validHours, message, rolloverX,
+                useHours: Number((document.getElementById('giftBatchUseHours') || {}).value) || 24, // #311
                 applyMode, applyScope, applyFrom, applyTo,
                 ...audience,
                 name: ((document.getElementById('giftBatchName') || {}).value || '').trim(),
@@ -12038,7 +12043,12 @@ async function loadNotifBatches() {
                 '</div>' +
                 '<div style="color:#999;margin-top:.25rem;">' + fecha + ' · envió <b>' + escapeHtml(b.sentBy || '-') + '</b> · ' +
                     b.total + ' destinatarios · ' + envio + (b.giftType === 'none' ? '' : ' · ' + b.claimed + ' con bono') +
-                    (b.sinNotis ? ' · <span style="color:#ff9d76;">' + b.sinNotis + ' sin notis</span>' : '') + '</div>' +
+                    (b.sinNotis ? ' · <span style="color:#ff9d76;">' + b.sinNotis + ' sin notis</span>' : '') +
+                    // #311 resultado de los bonos: cargaron con él / todavía activos / vencidos sin usar
+                    (b.giftType === 'percent' ? ' · <span style="color:#7fd7ff;">' + (b.usados || 0) + ' cargaron' + (b.bonoTotal > 0 ? ' ($' + Number(b.bonoTotal).toLocaleString('es-AR') + ')' : '') + '</span>' +
+                        ' · <span style="color:#00ff88;">' + (b.activos || 0) + ' activos</span>' +
+                        ' · <span style="color:#ff9d76;">' + (b.vencidos || 0) + ' vencidos sin usar</span>' +
+                        (b.mode === 'code' && b.useHours ? ' · ⏱ ' + b.useHours + 'hs para usar' : '') : '') + '</div>' +
                 '<div id="notifBatchDetail_' + b.id + '" style="display:none;margin-top:.5rem;"></div>' +
             '</div>';
         }).join('');
@@ -12058,21 +12068,36 @@ async function toggleNotifBatchDetail(id) {
         const j = await r.json();
         if (!r.ok) { box.innerHTML = '<p style="color:#ff6b6b;font-size:.8rem">' + escapeHtml(j.error || 'Error') + '</p>'; return; }
         const recs = j.recipients || [];
+        const sm = j.summary || {};
+        const fx = (d) => d ? new Date(d).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
         // Lotes grandes (completo/inactivos): renderizar hasta 400 filas para
         // no reventar el DOM; los totales de la fila de arriba son completos.
         const MAX_ROWS = 400;
         const shown = recs.slice(0, MAX_ROWS);
-        box.innerHTML = '<div style="max-height:260px;overflow-y:auto;background:rgba(0,0,0,0.25);border-radius:6px;padding:.5rem;">' +
+        // #311 resumen del lote: quién canjeó, quién cargó con el bono, quién lo dejó vencer.
+        const resumen = (j.batch && j.batch.giftType === 'percent')
+            ? '<div style="display:flex;gap:.6rem;flex-wrap:wrap;font-size:.78rem;margin-bottom:.4rem;">' +
+                '<span style="color:#ccc;">🔑 canjearon <b>' + (sm.canjearon || 0) + '</b></span>' +
+                '<span style="color:#7fd7ff;">⚡ cargaron con el bono <b>' + (sm.usaron || 0) + '</b>' + (sm.bonoTotal > 0 ? ' ($' + Number(sm.bonoTotal).toLocaleString('es-AR') + ' regalados)' : '') + '</span>' +
+                '<span style="color:#00ff88;">🎁 activos <b>' + (sm.activos || 0) + '</b></span>' +
+                '<span style="color:#ff9d76;">⏰ vencidos sin usar <b>' + (sm.vencidos || 0) + '</b></span>' +
+                (sm.cancelados ? '<span style="color:#888;">✕ cancelados/reemplazados <b>' + sm.cancelados + '</b></span>' : '') +
+              '</div>'
+            : '';
+        box.innerHTML = resumen + '<div style="max-height:260px;overflow-y:auto;background:rgba(0,0,0,0.25);border-radius:6px;padding:.5rem;">' +
             shown.map((u) => {
                 let estado;
+                const canje = u.claimedAt ? '<span style="color:#aaa;">canjeó ' + fx(u.claimedAt) + '</span> · ' : '';
+                const usoTxt = (u.usedAt ? ' ' + fx(u.usedAt) : '') + (u.cargaMonto > 0 ? ' · carga $' + Number(u.cargaMonto).toLocaleString('es-AR') : '') + (u.usesTotalBonus > 0 ? ' · bono $' + Number(u.usesTotalBonus).toLocaleString('es-AR') : '');
                 if (u.creditedAt) estado = '<span style="color:#00ff88;">💰 acreditado automático</span>';
                 else if (u.creditError) estado = '<span style="color:#ff6b6b;" title="' + escapeHtml(u.creditError) + '">⚠ sin acreditar: ' + escapeHtml(u.creditError) + '</span>';
-                else if (u.bonusStatus === 'used' && u.autoApply) estado = '<span style="color:#7fd7ff;">⚡ aplicado solo' + (u.usesTotalBonus > 0 ? ' ($' + Number(u.usesTotalBonus).toLocaleString('es-AR') + ')' : '') + (u.usedBy ? ' · ' + escapeHtml(u.usedBy) : '') + '</span>';
-                else if (u.bonusStatus === 'used') estado = '<span style="color:#888;">✔ usado por ' + escapeHtml(u.usedBy || '-') + '</span>';
-                else if (u.bonusStatus === 'active' && u.autoApply) estado = '<span style="color:#7fd7ff;">⚡ bono AUTO activo' + (u.applyScope === 'all' ? ' · aplicado ' + (u.usesCount || 0) + 'x' + (u.usesTotalBonus > 0 ? ' ($' + Number(u.usesTotalBonus).toLocaleString('es-AR') + ')' : '') : '') + '</span>';
-                else if (u.bonusStatus === 'active') estado = '<span style="color:#00ff88;">🎁 bono ACTIVO</span>';
-                else if (u.bonusStatus === 'expired') estado = '<span style="color:#888;">⏰ bono vencido</span>';
-                else if (u.claimedAt) estado = '<span style="color:#00ff88;">canjeado</span>';
+                else if (u.outcome === 'used' && u.autoApply) estado = canje + '<span style="color:#7fd7ff;">⚡ cargó con el bono (solo)' + usoTxt + (u.applyScope === 'all' ? ' · ' + (u.usesCount || 0) + 'x' : '') + '</span>';
+                else if (u.outcome === 'used') estado = canje + '<span style="color:#7fd7ff;">✔ cargó con el bono · lo aplicó ' + escapeHtml(u.usedBy || '-') + usoTxt + '</span>';
+                else if (u.outcome === 'active' && u.autoApply) estado = canje + '<span style="color:#00ff88;">⚡ bono AUTO activo · vence ' + fx(u.bonusExpiresAt) + '</span>';
+                else if (u.outcome === 'active') estado = canje + '<span style="color:#00ff88;">🎁 bono ACTIVO · vence ' + fx(u.bonusExpiresAt) + '</span>';
+                else if (u.outcome === 'expired') estado = canje + '<span style="color:#ff9d76;">⏰ venció sin usar (' + fx(u.bonusExpiresAt) + ')</span>';
+                else if (u.outcome === 'cancelled') estado = canje + '<span style="color:#888;">✕ cancelado o reemplazado por otro bono</span>';
+                else if (u.claimedAt) estado = '<span style="color:#00ff88;">canjeado ' + fx(u.claimedAt) + '</span>';
                 else estado = '<span style="color:#aaa;">sin canjear</span>';
                 const entrega = u.delivery === 'socket' ? '🟢 en la app' :
                     u.delivery === 'push' ? '🔔 push' :

@@ -145,6 +145,9 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 - **No hay NINGUNA sesión que renovar.** Auth por `X-Api-Key` fija en todo, incluido
   el netwin. Se fueron `ensureSession`, el mutex de login, `isHtmlBlocked` y el Bearer
   del panel (con `giroxReportsService`, eliminado el 2026-07-31).
+- **Lotes con regalo (#311):** el % de un lote automático usa `_loteBonusAmount` (tope
+  del bono de 1ª carga a cualquier %), NO `computeAutoBonus` (que solo topea el 100%).
+  Bono canjeado por código vence a `useHours` (24 h) del canje.
 - **Bonos automáticos APAGADOS por flags** (owner 2026-06-24): `INACTIVIDAD_DISABLED`
   y `BONUS_STRATEGY_DISABLED` (server.js) + `CHARGE_BONUSES_DISABLED`
   (notificationRulesService) + bonos de encuesta con `bDays=[]`. Tope 30% en TODO lo
