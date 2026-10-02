@@ -9477,6 +9477,7 @@ function renderCampaigns() {
                 <span>Comisión: ${c.commissionType === 'none' ? '—' : (c.commissionType === 'cpa' ? formatARS(c.commissionValue) + ' / FTD' : c.commissionValue + '% rev')}</span>
                 <span>${c.isActive ? '🟢 Activa' : '🔴 Inactiva'}</span>
                 ${c.hasJugayganaCreds ? '<span style="color:#4caf50;">🔐 Cuenta 1girox propia</span>' : '<span style="color:#888;">🔐 Usa master</span>'}
+                ${c.newSignupsTo ? `<span style="color:#ffb74d;">🔀 altas nuevas → ${escapeHtml(c.newSignupsTo)}</span>` : ''}
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
                 <button onclick="copyCampaignLink('${escapeHtml(c.code)}')" style="background:rgba(0,255,136,0.1);border:1px solid rgba(0,255,136,0.4);color:#00ff88;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;">📋 Copiar link</button>
@@ -9609,6 +9610,7 @@ function showCreateCampaignModal() {
     document.getElementById('campaignFormCommissionValue').value = '0';
     document.getElementById('campaignFormNotes').value = '';
     document.getElementById('campaignFormActiveRow').style.display = 'none';
+    document.getElementById('campaignFormRedirectRow').style.display = 'none';
     document.getElementById('campaignFormError').style.display = 'none';
     _resetCampaignCredsForm(false);
     window._campaignFormInfluencers = [];
@@ -9632,6 +9634,17 @@ function editCampaign(code) {
     document.getElementById('campaignFormNotes').value = campaign.notes || '';
     document.getElementById('campaignFormActiveRow').style.display = '';
     document.getElementById('campaignFormIsActive').checked = campaign.isActive !== false;
+    // #315: desvío de altas nuevas → opciones = otras campañas activas sin desvío propio.
+    const _redirSel = document.getElementById('campaignFormNewSignupsTo');
+    const _redirOpts = (_campaignsCache || []).filter(c => c.code !== code && c.isActive !== false && !c.newSignupsTo);
+    _redirSel.innerHTML = '<option value="">— sin desvío —</option>' + _redirOpts.map(c =>
+        `<option value="${escapeHtml(c.code)}">${escapeHtml(c.code)} · ${escapeHtml(c.publisher || '')}${c.hasJugayganaCreds ? ' 🔐' : ' (usa master)'}</option>`).join('');
+    _redirSel.value = campaign.newSignupsTo || '';
+    if (campaign.newSignupsTo && _redirSel.value !== campaign.newSignupsTo) {
+        _redirSel.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(campaign.newSignupsTo)}">${escapeHtml(campaign.newSignupsTo)} (inactiva)</option>`);
+        _redirSel.value = campaign.newSignupsTo;
+    }
+    document.getElementById('campaignFormRedirectRow').style.display = '';
     document.getElementById('campaignFormError').style.display = 'none';
     // Creds JUGAYGANA: NUNCA mostramos el password (el backend ni lo devuelve).
     // En edit, el username sí lo precargamos para que el admin lo vea.
@@ -9830,6 +9843,10 @@ async function submitCampaignForm() {
         } else {
             const originalCode = document.getElementById('campaignFormOriginalCode').value;
             body.isActive = document.getElementById('campaignFormIsActive').checked;
+            // #315: solo se manda si cambió (un depositor no puede tocarlo).
+            const _prevRedir = ((_campaignsCache || []).find(c => c.code === originalCode) || {}).newSignupsTo || '';
+            const _newRedir = document.getElementById('campaignFormNewSignupsTo').value || '';
+            if (_newRedir !== _prevRedir) body.newSignupsTo = _newRedir || null;
             response = await fetch(`${API_URL}/api/admin/campaigns/${encodeURIComponent(originalCode)}`, {
                 method: 'PUT',
                 headers: {

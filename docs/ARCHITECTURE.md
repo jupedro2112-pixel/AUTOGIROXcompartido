@@ -5,7 +5,9 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-09-30** — limpieza de partes stale: regalos como BONO
+> Última actualización: **2026-10-02** — desvío de altas nuevas a otra campaña
+> (`Campaign.newSignupsTo`, #315: §2 Campaign, §5 publisher_admin).
+> Antes: 2026-09-30 — limpieza de partes stale: regalos como BONO
 > (#266, §4.5/§5/§9), referidos 3% (#307, §4.6/§5), reembolso diario de vuelta (#297,
 > §4.1/§8), crons nuevos (§7), `giroxReportsService` fuera de §9.
 > Antes: 2026-08-03 — niveles VIP por apostado acumulado (réplica de
@@ -143,6 +145,15 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   mantenerlo en sincronía en TODOS los caminos que escriben o limpian la key. Los campos
   `jugayganaUsername/jugayganaPassword` quedan para revertir. También `influencers[]`
   (lista fija para sub-atribución analítica).
+  **`newSignupsTo` (#315):** código de otra campaña adonde van las altas NUEVAS que
+  entran por ésta (landing, registro PWA, alta del publisher_admin) → se crean con la
+  key del destino (otra cuenta de 1girox = venta separada) y `acquisitionCampaign`/
+  `giroxOwnerCampaign` = destino. Un solo salto (`_resolveSignupCampaign`); los
+  usuarios viejos no se tocan. El publicista no nota nada: `_expandSignupRedirects`
+  suma el destino en su my-stats, "Mis usuarios" (badge con su código) y
+  `/api/campaign-stats`. ⚠️ Para separar venta con una key de OTRA cuenta usar esto,
+  NO el pool de keys: el pool es solo para keys de la MISMA cuenta (las rechaza si no
+  ven a los jugadores) y "Probar la key" prueba la key GUARDADA, no la escrita.
   **⚠️ RUTEO POR DUEÑO (2026-08-05):** la key MASTER NO ve por Partner API a los
   jugadores creados bajo un sub-agente. `User.giroxOwnerCampaign` marca la campaña
   dueña (se setea en el alta del publisher_admin con key OK) y `giroxService` firma

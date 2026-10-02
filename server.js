@@ -4034,7 +4034,8 @@ app.post('/api/auth/register', authLimiter, registerIpLimiter, async (req, res) 
       const normalizedCampaignCode = String(campaignCode).toUpperCase().trim();
       if (/^[A-Z0-9_-]{3,40}$/.test(normalizedCampaignCode)) {
         const c = await Campaign.findOne({ code: normalizedCampaignCode, isActive: true }).lean();
-        if (c) attributedCampaign = normalizedCampaignCode;
+        // #315: desvío de altas nuevas a la campaña destino (si está configurado).
+        if (c) attributedCampaign = (await _resolveSignupCampaign(c)).code;
       }
     }
 
@@ -4433,11 +4434,15 @@ app.post('/api/landing/signup', landingIpLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Falta el código de campaña.' });
     }
 
-    const normalizedCode = String(campaignCode).toUpperCase().trim();
-    const campaign = await Campaign.findOne({ code: normalizedCode, isActive: true }).lean();
-    if (!campaign) {
+    const linkCode = String(campaignCode).toUpperCase().trim();
+    const linkCampaign = await Campaign.findOne({ code: linkCode, isActive: true }).lean();
+    if (!linkCampaign) {
       return res.status(400).json({ error: 'Código de pauta inválido o inactivo.' });
     }
+    // #315: el link sigue siendo el de siempre, pero si la campaña desvía las
+    // altas nuevas, el jugador se crea en la campaña destino (key + atribución).
+    const campaign = await _resolveSignupCampaign(linkCampaign);
+    const normalizedCode = campaign.code;
 
     const username = await _deriveUniqueUsername(nameT);
     if (!username) {
@@ -11938,13 +11943,15 @@ app.get('/api/campaign-stats/:code', async (req, res) => {
     const clicks = await CampaignClick.countDocuments(clickQ);
 
     // 2) Registros (usuarios de la campaña).
-    const regQ = { acquisitionCampaign: code, role: 'user' };
+    // #315: el publicista ve también las altas desviadas a la campaña destino.
+    const { codes: statCodes } = await _expandSignupRedirects([code]);
+    const regQ = { acquisitionCampaign: { $in: statCodes }, role: 'user' };
     const _db2 = dateBounds(); if (_db2) regQ.createdAt = _db2;
     const registros = await User.countDocuments(regQ);
 
     // 3) Primeras cargas (FTD): usuarios de la campaña cuya PRIMERA carga real
     //    cae en el rango. Se calcula el primer depósito por usuario y se cuenta.
-    const campUserIds = await User.find({ acquisitionCampaign: code, role: 'user' }).select('id').lean();
+    const campUserIds = await User.find({ acquisitionCampaign: { $in: statCodes }, role: 'user' }).select('id').lean();
     const ids = campUserIds.map((u) => u.id);
     let primerasCargas = 0;
     let totalCargasMonto = 0, totalCargasCantidad = 0;
@@ -14499,6 +14506,24 @@ app.put('/api/admin/campaigns/:code', authMiddleware, adminMiddleware, async (re
     if (typeof isActive === 'boolean') update.isActive = isActive;
     if (typeof notes === 'string') update.notes = notes.slice(0, 2000);
 
+    // === #315 Desvío de altas nuevas === '' / null = quitar. Solo admin general.
+    if ('newSignupsTo' in (req.body || {})) {
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Solo el administrador general puede desviar las altas nuevas.' });
+      }
+      const t = String(req.body.newSignupsTo || '').toUpperCase().trim();
+      if (!t) {
+        update.newSignupsTo = null;
+      } else {
+        if (t === normalizedCode) return res.status(400).json({ error: 'La campaña destino no puede ser la misma.' });
+        const dest = await Campaign.findOne({ code: t }).select('code isActive newSignupsTo').lean();
+        if (!dest) return res.status(400).json({ error: `No existe la campaña ${t}. Creala primero.` });
+        if (dest.isActive === false) return res.status(400).json({ error: `La campaña ${t} está desactivada.` });
+        if (dest.newSignupsTo) return res.status(400).json({ error: `La campaña ${t} ya desvía sus altas a otra: elegí una sin desvío.` });
+        update.newSignupsTo = t;
+      }
+    }
+
     // === Influencers ===
     // Si viene el campo (aunque sea []) reemplazamos la lista entera. Ausente = no tocar.
     if ('influencers' in (req.body || {})) {
@@ -14794,6 +14819,44 @@ function _publisherCodesOf(employee) {
   ));
 }
 
+// #315 — Desvío de altas nuevas: si `campaign.newSignupsTo` apunta a otra campaña
+// ACTIVA, las altas nuevas van ahí (su key de 1girox + su atribución). Un solo
+// salto. Si el destino no existe o está inactivo, se usa la original (nunca se
+// frena un alta por esto) y queda un warn en el log.
+async function _resolveSignupCampaign(campaign) {
+  try {
+    const target = campaign && campaign.newSignupsTo
+      ? String(campaign.newSignupsTo).toUpperCase().trim() : '';
+    if (!target || target === campaign.code) return campaign;
+    const dest = await Campaign.findOne({ code: target, isActive: true }).lean();
+    if (!dest) {
+      logger.warn(`[signup-redirect] ${campaign.code} → ${target}: destino inexistente o inactivo, se usa la original`);
+      return campaign;
+    }
+    return dest;
+  } catch (e) {
+    logger.warn(`[signup-redirect] ${campaign && campaign.code}: ${e.message}`);
+    return campaign;
+  }
+}
+
+// #315 — códigos + sus destinos de desvío (para que el publisher_admin y el link
+// de stats del publicista sigan viendo TODO lo suyo aunque las altas nuevas caigan
+// en la campaña destino). Devuelve { codes, aliasOf } — aliasOf[destino] = origen.
+async function _expandSignupRedirects(codes) {
+  const list = Array.from(new Set((codes || []).filter(Boolean)));
+  const aliasOf = {};
+  try {
+    const rows = await Campaign.find({ code: { $in: list }, newSignupsTo: { $ne: null } })
+      .select('code newSignupsTo').lean();
+    for (const r of rows) {
+      const t = String(r.newSignupsTo || '').toUpperCase().trim();
+      if (t && t !== r.code && !list.includes(t)) { list.push(t); aliasOf[t] = r.code; }
+    }
+  } catch (_) {}
+  return { codes: list, aliasOf };
+}
+
 // POST /api/admin/publisher-admin/create-user
 // El publisher_admin crea un usuario para uno de SUS publicistas. Desde
 // 2026-08-07 una cuenta puede tener VARIOS: si tiene más de uno, el body DEBE
@@ -14843,19 +14906,23 @@ app.post('/api/admin/publisher-admin/create-user', authMiddleware, publisherAdmi
 
     // Validar que la campaña sigue existiendo y activa (un admin podría haberla
     // desactivado después de asignarla a este publisher_admin).
-    const campaign = await Campaign.findOne({ code: chosenCode }).lean();
-    if (!campaign) {
+    const chosenCampaign = await Campaign.findOne({ code: chosenCode }).lean();
+    if (!chosenCampaign) {
       return res.status(400).json({ error: 'La campaña elegida ya no existe. Contactá al administrador general.' });
     }
-    if (campaign.isActive === false) {
+    if (chosenCampaign.isActive === false) {
       return res.status(400).json({ error: 'Ese publicista está desactivado. Contactá al administrador general.' });
     }
+    // #315: si la campaña desvía las altas nuevas, el usuario se crea en la
+    // campaña destino (key + atribución). Los influencers se validan contra la
+    // campaña que el publicista VE (la elegida), no contra el destino.
+    const campaign = await _resolveSignupCampaign(chosenCampaign);
 
     // Sub-atribución por influencer. Si la campaña tiene influencers ACTIVOS, el
     // publisher_admin DEBE elegir uno (la elección viene en body.influencer y se
     // matchea case-insensitive contra la lista, guardando el nombre canónico). Si
     // la campaña no tiene influencers cargados, se ignora (flujo igual al de antes).
-    const activeInfluencers = (campaign.influencers || []).filter(i => i.isActive).map(i => i.name);
+    const activeInfluencers = (chosenCampaign.influencers || []).filter(i => i.isActive).map(i => i.name);
     let chosenInfluencer = null;
     if (activeInfluencers.length > 0) {
       const raw = typeof req.body.influencer === 'string' ? req.body.influencer.trim() : '';
@@ -15067,8 +15134,10 @@ app.get('/api/admin/publisher-admin/my-stats', authMiddleware, publisherAdminMid
     // y createdByEmployeeId == el ID del empleado logueado). Esto evita mezclar
     // los orgánicos del link de pauta si la campaña también está activa allí.
     // Con varias campañas asignadas se suman TODAS (los totales son de la cuenta).
+    // #315: + las campañas destino del desvío de altas nuevas.
+    const { codes: visibleCodes } = await _expandSignupRedirects(allowedCodes);
     const baseQuery = {
-      acquisitionCampaign: { $in: allowedCodes },
+      acquisitionCampaign: { $in: visibleCodes },
       acquisitionSource: 'manual',
       createdByEmployeeId: employee.id
     };
@@ -15152,10 +15221,11 @@ app.get('/api/admin/publisher-admin/users', authMiddleware, publisherAdminMiddle
     // se valida contra la lista para no filtrar por campañas ajenas.
     const campaignFilter = String(req.query.campaign || '').toUpperCase().trim();
 
+    // #315: cada código suma su campaña destino de altas nuevas (si tiene).
+    const scopeCodes = campaignFilter && allowedCodes.includes(campaignFilter) ? [campaignFilter] : allowedCodes;
+    const { codes: visibleCodes, aliasOf: _redirAlias } = await _expandSignupRedirects(scopeCodes);
     const baseQuery = {
-      acquisitionCampaign: campaignFilter && allowedCodes.includes(campaignFilter)
-        ? campaignFilter
-        : { $in: allowedCodes },
+      acquisitionCampaign: { $in: visibleCodes },
       acquisitionSource: 'manual',
       createdByEmployeeId: employee.id
     };
@@ -15176,6 +15246,10 @@ app.get('/api/admin/publisher-admin/users', authMiddleware, publisherAdminMiddle
       .limit(PER_PAGE)
       .lean();
 
+    // #315: el publicista ve su código de siempre (no el de la campaña destino).
+    for (const u of users) {
+      if (u && u.acquisitionCampaign && _redirAlias[u.acquisitionCampaign]) u.acquisitionCampaign = _redirAlias[u.acquisitionCampaign];
+    }
     res.json({ users, total, page, totalPages, perPage: PER_PAGE });
   } catch (err) {
     logger.error(`[publisher_admin users] ${err.message}`);

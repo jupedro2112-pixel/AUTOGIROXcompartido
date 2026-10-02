@@ -4,7 +4,38 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-09-30**
+> **Última actualización: 2026-10-02**
+
+## Sesión 2026-10-02
+
+### 315. Desvío de ALTAS NUEVAS a otra campaña (mismo link, venta y retención separadas)
+- Owner: quiere separar la venta de OK2026 en 1girox con una key de OTRA cuenta
+  ("agente" nuevo OK2026OCTUBRE) para medir la retención de octubre en adelante, SIN
+  avisarle nada al publicista (mismo link de landing, mismo panel). Pegar la key nueva
+  en el pool de OK2026 no servía: el pool exige que la key vea a los jugadores
+  existentes (#192) y la descartaba ("no ve a los jugadores del publicista"); además
+  "Probar la key" prueba la key GUARDADA, no la escrita → daba OK con la vieja.
+- `Campaign.newSignupsTo` (código destino, null = sin desvío). `_resolveSignupCampaign`
+  (un solo salto; destino inexistente/inactivo → usa la original + warn) aplicado en:
+  `/api/landing/signup` (alta con la key del destino, `giroxOwnerCampaign` y
+  `acquisitionCampaign` = destino; CAPI con publisher/código del destino),
+  `/api/auth/register` (atribución) y `publisher-admin/create-user` (key + atribución;
+  los influencers se validan contra la campaña ELEGIDA).
+- `_expandSignupRedirects(codes)`: el publisher_admin (my-stats, "Mis usuarios" — el
+  badge muestra su código de siempre) y el link de stats del publicista
+  (`/api/campaign-stats`) suman la campaña destino → para él nada cambia.
+- PUT `/api/admin/campaigns/:code` acepta `newSignupsTo` (solo admin general; destino
+  debe existir, estar activo y no tener desvío propio). Panel (admin-sw v67): select
+  "🔀 Altas NUEVAS van a la campaña" en Editar campaña + badge en la card.
+- Uso: crear OK2026OCTUBRE con la key nueva y el MISMO nombre de publicista ("Ok2026",
+  así los pixels por publicista siguen andando) → editar OK2026 → elegir el destino.
+  Si un slot `META_PIXEL_PUBLISHER_N` lista el CÓDIGO OK2026 (no el nombre), sumarle
+  OK2026OCTUBRE. Datos 2.0 / analítica por campaña separan solas las dos camadas.
+- **Probado:** `node --check` en server.js, Campaign.js, admin.js, admin-sw.js.
+  **Back necesita redeploy.** PROBAR: alta por landing con el link de OK2026 → el
+  usuario queda en OK2026OCTUBRE y aparece en el panel de 1girox de la cuenta nueva;
+  alta del publisher_admin → ídem y la ve en "Mis usuarios" con su código de siempre;
+  carga a un usuario VIEJO de OK2026 → sigue funcionando con la key vieja.
 
 ## Sesión 2026-09-30
 

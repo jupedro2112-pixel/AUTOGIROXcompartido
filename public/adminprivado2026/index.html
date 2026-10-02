@@ -2346,6 +2346,15 @@ document.addEventListener('change', function (ev) {
                             </div>
                         </details>
 
+                        <!-- #315: desvío de altas nuevas (solo edición) -->
+                        <div id="campaignFormRedirectRow" style="display:none;background:rgba(255,152,0,0.06);border:1px solid rgba(255,152,0,0.3);border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+                            <label style="color:#ffb74d;font-size:12px;font-weight:700;display:block;margin-bottom:4px;">🔀 Altas NUEVAS van a la campaña (opcional)</label>
+                            <select id="campaignFormNewSignupsTo" style="width:100%;padding:8px;background:#1a1a2e;color:#fff;border:1px solid #444;border-radius:6px;"></select>
+                            <div style="color:#999;font-size:11px;line-height:1.45;margin-top:6px;">
+                                El publicista sigue con el <b>mismo link y el mismo panel</b>, pero cada usuario NUEVO (landing, registro o alta del publicista) se crea en la campaña elegida: con <b>su key de 1girox</b> (venta separada) y atribuido a ella (retención aparte). Los usuarios viejos no cambian. Para cortar el desvío elegí "— sin desvío —".
+                            </div>
+                        </div>
+
                         <div id="campaignFormActiveRow" style="display:none;">
                             <label style="color:#aaa;font-size:12px;display:flex;align-items:center;gap:8px;cursor:pointer;">
                                 <input type="checkbox" id="campaignFormIsActive" checked> Campaña activa

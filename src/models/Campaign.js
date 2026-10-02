@@ -147,6 +147,19 @@ const campaignSchema = new mongoose.Schema({
     default: null,
     select: false
   },
+  // === Desvío de ALTAS NUEVAS a otra campaña (#315, 2026-10-02) ===
+  // Si está seteado, toda alta NUEVA que entre por esta campaña (link de landing,
+  // registro de la PWA con el código, alta del publisher_admin) se crea en la
+  // campaña destino: con SU key de 1girox (otra cuenta → venta separada) y
+  // atribuida a ella (retención por camada). El publicista sigue usando el mismo
+  // link y el mismo panel. Los usuarios VIEJOS no se tocan. Un solo salto (el
+  // destino no se vuelve a desviar). null = sin desvío.
+  newSignupsTo: {
+    type: String,
+    default: null,
+    uppercase: true,
+    trim: true
+  },
   // === Influencers del publicista (sub-atribución para analítica) ===
   // Lista fija, gestionada por el admin general. Cuando un publisher_admin crea
   // un usuario, elige uno de estos influencers y el nombre queda en
