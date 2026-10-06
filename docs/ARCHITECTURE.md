@@ -716,6 +716,16 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   `CashbackClaim` (índice único userId+dateKey+seq), reference `vip-cbk-<user>-<día>-<seq>`
   (reintento = misma reference → la plataforma dedupe), crédito por depósito con
   `multiplier`. Lo cobrado se DESCUENTA del reembolso semanal/mensual (claim y status).
+- **Credenciales hgcash desde el panel (#320):** token de API y secreto del webhook se pueden
+  cargar en panel → Banco automático → "🔐 Cuenta hgcash conectada" (solo admin general,
+  `GET/POST/DELETE /api/admin/hgcash/credentials`). Se guardan CIFRADOS (AES-256-GCM, clave
+  derivada de JWT_SECRET) en `Config['hgcashCredentials']`; cada instancia los carga en
+  memoria al arrancar y cada 60 s (`_loadHgcashCredentials` → `hgcashPay.setTokenOverride`).
+  Prioridad panel > SSM (`HGCASH_API_TOKEN`/`HGCASH_WEBHOOK_SECRET` quedan de respaldo). El
+  token se prueba con `GET /accounts` antes de guardar; al cambiarlo se limpia el
+  `accountId` cacheado. El webhook acepta la firma con el secreto del panel O el de SSM
+  (cambio de cuenta sin perder avisos). ⚠️ Si cambia JWT_SECRET lo del panel no se descifra
+  → cae a SSM y el panel lo avisa.
 - **AUTO-CARGA hgcash** (`POST /api/hgcash/webhook`, firma HMAC sobre rawBody,
   fail-closed en prod): guarda BankMovement → matching contra Comprobantes por
   monto + (N° operación==coelsa/externalID, o nombre de origen + destino consistente)

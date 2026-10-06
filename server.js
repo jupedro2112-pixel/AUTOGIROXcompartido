@@ -3195,15 +3195,67 @@ function _fanoutHgcashWebhook(req) {
   }
 }
 
+// ============================================
+// #320 CREDENCIALES hgcash desde el PANEL (token de API + secreto del webhook)
+// ============================================
+// Owner: que un cambio de cuenta hgcash (se cae una, cambia el titular) lo pueda hacer un
+// admin desde el panel, sin entrar a AWS SSM. Se guardan CIFRADAS (AES-256-GCM, clave
+// derivada de JWT_SECRET, que ya vive en SSM) en Config['hgcashCredentials']; un dump de la
+// base no las expone. Cada instancia las carga en memoria al arrancar y cada 60 s.
+// Prioridad: panel > SSM. El webhook acepta la firma con CUALQUIERA de los dos secretos
+// (panel o SSM) → durante el cambio de cuenta no se pierde ningún aviso.
+// ⚠️ Si JWT_SECRET cambia, lo guardado no se puede descifrar → se usa SSM (y el panel avisa).
+let _hgcashPanelSecret = null;
+let _hgcashCredMeta = null; // { tokenLast4, secretLast4, updatedBy, updatedAt, decryptError }
+function _credKey() {
+  const base = process.env.JWT_SECRET || JWT_SECRET || '';
+  if (!base) return null;
+  return crypto.createHash('sha256').update(base + ':hgcash-credentials:v1').digest();
+}
+function _credEncrypt(plain) {
+  const key = _credKey(); if (!key) throw new Error('JWT_SECRET no disponible para cifrar');
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([c.update(String(plain), 'utf8'), c.final()]);
+  return [iv.toString('base64'), c.getAuthTag().toString('base64'), enc.toString('base64')].join('.');
+}
+function _credDecrypt(blob) {
+  const key = _credKey(); if (!key || !blob) return null;
+  const [iv, tag, data] = String(blob).split('.');
+  const d = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
+  d.setAuthTag(Buffer.from(tag, 'base64'));
+  return Buffer.concat([d.update(Buffer.from(data, 'base64')), d.final()]).toString('utf8');
+}
+async function _loadHgcashCredentials() {
+  try {
+    const v = await getConfig('hgcashCredentials', null);
+    if (!v || (!v.tokenEnc && !v.secretEnc)) {
+      hgcashPay.setTokenOverride(null); _hgcashPanelSecret = null; _hgcashCredMeta = null; return;
+    }
+    let token = null, secret = null, decryptError = false;
+    try { token = v.tokenEnc ? _credDecrypt(v.tokenEnc) : null; } catch (_) { decryptError = true; }
+    try { secret = v.secretEnc ? _credDecrypt(v.secretEnc) : null; } catch (_) { decryptError = true; }
+    hgcashPay.setTokenOverride(token);
+    _hgcashPanelSecret = secret || null;
+    _hgcashCredMeta = { tokenLast4: v.tokenLast4 || null, secretLast4: v.secretLast4 || null, updatedBy: v.updatedBy || null, updatedAt: v.updatedAt || null, decryptError };
+    if (decryptError) logger.error('[hgcash] credenciales del panel NO se pudieron descifrar (¿cambió JWT_SECRET?) — se usa SSM');
+  } catch (e) { logger.warn(`[hgcash] no se pudieron leer las credenciales del panel: ${e.message}`); }
+}
+setTimeout(() => { _loadHgcashCredentials(); }, 8 * 1000);
+setInterval(() => { _loadHgcashCredentials(); }, 60 * 1000);
+function _hgcashWebhookSecrets() {
+  return [_hgcashPanelSecret, process.env.HGCASH_WEBHOOK_SECRET || null].filter(Boolean);
+}
+
 app.post('/api/hgcash/webhook', async (req, res) => {
   try {
-    const secret = process.env.HGCASH_WEBHOOK_SECRET || null;
-    if (secret) {
+    const secrets = _hgcashWebhookSecrets(); // #320: panel y/o SSM
+    if (secrets.length) {
       const sigHeader = req.get('X-HG-Webhook-Signature') || '';
       const raw = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
-      const expected = crypto.createHmac('sha256', secret).update(raw, 'utf8').digest('hex');
       const provided = sigHeader.toLowerCase().startsWith('sha256=') ? sigHeader.slice(7).toLowerCase() : sigHeader.toLowerCase();
-      if (!safeCompare(expected, provided)) {
+      const okSig = secrets.some((sec) => safeCompare(crypto.createHmac('sha256', sec).update(raw, 'utf8').digest('hex'), provided));
+      if (!okSig) {
         // #277: ~2.000 rechazos/día en los logs del 13-14/09 sin saber de dónde
         // vienen. Se loguea el origen (IP, X-Forwarded-By del fan-out de otro
         // proyecto, UA, id/monto del payload) para identificar al emisor.
@@ -3217,7 +3269,7 @@ app.post('/api/hgcash/webhook', async (req, res) => {
       // Fail-closed en producción: sin secreto no se puede validar la firma → NO se
       // procesa el webhook (evita inyección de movimientos/cargas falsas). En dev se permite.
       if (process.env.NODE_ENV === 'production') {
-        logger.error('[hgcash] webhook RECHAZADO en producción: falta HGCASH_WEBHOOK_SECRET en SSM');
+        logger.error('[hgcash] webhook RECHAZADO en producción: falta el secreto (panel → Banco automático, o HGCASH_WEBHOOK_SECRET en SSM)');
         return res.status(503).json({ error: 'webhook no configurado' });
       }
       logger.warn('[hgcash] webhook recibido SIN HGCASH_WEBHOOK_SECRET — no se valida firma (solo dev)');
@@ -17984,6 +18036,64 @@ app.post('/api/admin/cbu', authMiddleware, adminMiddleware, async (req, res) => 
 // ============================================
 // BANCO AUTOMÁTICO (hgcash) — config y movimientos (solo admin general)
 // ============================================
+
+// #320 Credenciales hgcash desde el panel (SOLO admin general: mueven plata).
+app.get('/api/admin/hgcash/credentials', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    await _loadHgcashCredentials();
+    const m = _hgcashCredMeta || {};
+    res.json({
+      tokenSource: hgcashPay.getTokenSource(),        // panel | ssm | none
+      panelToken: !!m.tokenLast4, panelSecret: !!m.secretLast4,
+      tokenLast4: m.tokenLast4 || null, secretLast4: m.secretLast4 || null,
+      updatedBy: m.updatedBy || null, updatedAt: m.updatedAt || null, decryptError: !!m.decryptError,
+      ssmToken: !!process.env.HGCASH_API_TOKEN, ssmSecret: !!process.env.HGCASH_WEBHOOK_SECRET,
+      webhookFullUrl: `${getPublicBaseUrl()}/api/hgcash/webhook`
+    });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/hgcash/credentials', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const b = req.body || {};
+    const token = typeof b.token === 'string' ? b.token.trim() : '';
+    const secret = typeof b.webhookSecret === 'string' ? b.webhookSecret.trim() : '';
+    if (!token && !secret) return res.status(400).json({ error: 'Pegá el token de API y/o el secreto del webhook' });
+    if (token && (token.length < 10 || token.length > 300 || /\s/.test(token))) return res.status(400).json({ error: 'El token no parece válido' });
+    if (secret && (secret.length < 8 || secret.length > 300 || /\s/.test(secret))) return res.status(400).json({ error: 'El secreto no parece válido' });
+    if (!_credKey()) return res.status(503).json({ error: 'No se puede cifrar ahora (falta JWT_SECRET). Usá SSM.' });
+    // El token se PRUEBA contra hgcash antes de guardar: si no anda, no se pisa el que funciona.
+    let accounts = null;
+    if (token) {
+      const t = await hgcashPay.getAccounts(token);
+      if (!t.ok) return res.status(400).json({ error: 'hgcash rechazó ese token: ' + String(t.error || '').slice(0, 160) });
+      accounts = (t.data || []).map((a) => ({ id: a.id, currency: a.currency, status: a.status, name: a.name || a.holderName || a.alias || null }));
+    }
+    const prev = (await getConfig('hgcashCredentials', null)) || {};
+    const next = Object.assign({}, prev, { updatedBy: req.user.username, updatedAt: new Date() });
+    if (token) { next.tokenEnc = _credEncrypt(token); next.tokenLast4 = token.slice(-4); }
+    if (secret) { next.secretEnc = _credEncrypt(secret); next.secretLast4 = secret.slice(-4); }
+    await setConfig('hgcashCredentials', next);
+    if (token) {
+      // Cuenta nueva → el accountId cacheado es de la VIEJA: se limpia y se resuelve con el token nuevo (#53).
+      try { const cfg = await getHgcashConfig(); await setConfig('hgcash', Object.assign({}, cfg, { accountId: null })); } catch (_) {}
+    }
+    await _loadHgcashCredentials();
+    logger.warn(`[hgcash] credenciales cambiadas desde el panel por ${req.user.username}: ${token ? 'token …' + token.slice(-4) : ''}${token && secret ? ' + ' : ''}${secret ? 'secreto …' + secret.slice(-4) : ''}`);
+    res.json({ success: true, tokenSource: hgcashPay.getTokenSource(), accounts });
+  } catch (e) { logger.warn(`[hgcash] credentials POST: ${e.message}`); res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.delete('/api/admin/hgcash/credentials', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    await setConfig('hgcashCredentials', { tokenEnc: null, secretEnc: null, tokenLast4: null, secretLast4: null, updatedBy: req.user.username, updatedAt: new Date() });
+    try { const cfg = await getHgcashConfig(); await setConfig('hgcash', Object.assign({}, cfg, { accountId: null })); } catch (_) {}
+    await _loadHgcashCredentials();
+    logger.warn(`[hgcash] credenciales del panel BORRADAS por ${req.user.username} → vuelve a SSM`);
+    res.json({ success: true, tokenSource: hgcashPay.getTokenSource() });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
 app.get('/api/admin/hgcash/config', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
@@ -17991,7 +18101,7 @@ app.get('/api/admin/hgcash/config', authMiddleware, adminMiddleware, async (req,
     res.json({
       config: cfg,
       // No exponemos el secreto; sólo si está cargado (para que el panel avise).
-      secretConfigured: !!process.env.HGCASH_WEBHOOK_SECRET,
+      secretConfigured: _hgcashWebhookSecrets().length > 0, // #320: panel o SSM
       aiEnabled: comprobanteAi.isEnabled(),
       webhookUrl: '/api/hgcash/webhook',
       // URL COMPLETA armada con el dominio real (getter lazy): el panel la

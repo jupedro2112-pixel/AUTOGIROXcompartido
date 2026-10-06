@@ -8,6 +8,26 @@
 
 ## Sesión 2026-10-06
 
+### 320. Cuenta hgcash (token + secreto del webhook) cargable desde el PANEL
+- Owner: hoy cambiar de cuenta hgcash (se cae una, cambia el titular) obliga a entrar a AWS
+  SSM; que lo pueda hacer un encargado desde el panel, rápido.
+- Panel → Banco automático → card "🔐 Cuenta hgcash conectada" (solo admin general): muestra
+  qué se usa (PANEL / AWS / ninguno, últimos 4 caracteres, quién lo cambió) y permite pegar
+  token y/o secreto → "Probar y guardar" (el token se prueba con `GET /accounts` de hgcash
+  antes de pisar nada; muestra las cuentas que ve) y "Volver a usar AWS (SSM)".
+- Backend: `Config['hgcashCredentials']` CIFRADO (AES-256-GCM, clave = sha256(JWT_SECRET +
+  sufijo)); `_loadHgcashCredentials` al arrancar y cada 60 s (multi-instancia) →
+  `hgcashService.setTokenOverride` (panel > SSM). Webhook: acepta la firma con el secreto del
+  panel O el de SSM → durante el cambio no se pierde ningún aviso. Al cambiar el token se
+  limpia el `accountId` cacheado (se re-resuelve con la cuenta nueva, #53).
+  `GET/POST/DELETE /api/admin/hgcash/credentials`. admin-sw v69.
+- Para cambiar de cuenta: en el dashboard de la cuenta NUEVA de hgcash configurar el webhook a
+  la URL que muestra la card + generar su secreto → pegar token y secreto en el panel.
+- **Probado:** `node --check` (server.js, hgcashService.js, admin.js, admin-sw.js), HTML del
+  panel balanceado. **Back necesita redeploy.** PROBAR: pegar un token inválido → "hgcash
+  rechazó ese token" y no cambia nada; uno válido → lista la cuenta y el saldo hgcash se
+  actualiza; carga real con la cuenta nueva → el webhook entra (firma con el secreto nuevo).
+
 ### 319. Popup de referidos: 1 vez cada 24 h (antes cada 30 min)
 - Owner. `REF_PROMO_COOLDOWN_MS` = 24 h (ui.js, por dispositivo vía `localStorage
   vip_refPromoAt`); `?refpromo=1` lo sigue forzando. SW → v194, `ui.js?v=319`,

@@ -6201,6 +6201,59 @@ async function saveFireMilestones() {
     }
 }
 
+// #320 Credenciales hgcash (token + secreto del webhook) desde el panel. Solo admin general.
+async function loadHgcashCredentials() {
+    const box = document.getElementById('hgcashCredBox');
+    const st = document.getElementById('hgcashCredStatus');
+    if (!box) return;
+    try {
+        const r = await authFetch('/api/admin/hgcash/credentials');
+        if (!r.ok) { box.style.display = 'none'; return; }
+        box.style.display = '';
+        const j = await r.json();
+        const src = j.tokenSource === 'panel' ? '<b style="color:#66ff99;">PANEL</b> (token …' + escapeHtml(j.tokenLast4 || '') + ')'
+            : j.tokenSource === 'ssm' ? '<b style="color:#ffd479;">AWS (SSM)</b>' : '<b style="color:#ff8080;">NINGUNO — el pago y la carga automática no andan</b>';
+        const sec = j.panelSecret ? '<b style="color:#66ff99;">PANEL</b> (…' + escapeHtml(j.secretLast4 || '') + ')' + (j.ssmSecret ? ' + AWS de respaldo' : '')
+            : (j.ssmSecret ? '<b style="color:#ffd479;">AWS (SSM)</b>' : '<b style="color:#ff8080;">NINGUNO — los avisos de hgcash se rechazan</b>');
+        st.innerHTML = '🔑 Token en uso: ' + src + '<br>✍️ Secreto del webhook: ' + sec +
+            (j.updatedBy ? '<br><span style="color:#888;">Último cambio desde el panel: ' + escapeHtml(j.updatedBy) + ' · ' + (j.updatedAt ? fmtFechaHoraAR(j.updatedAt) : '') + '</span>' : '') +
+            (j.decryptError ? '<br><span style="color:#ff8080;">⚠️ Lo guardado en el panel no se pudo leer (¿cambió JWT_SECRET?). Se está usando AWS. Volvé a cargarlo.</span>' : '');
+        const u = document.getElementById('hgcashCredWebhookUrl'); if (u) u.textContent = j.webhookFullUrl || '';
+    } catch (_) { if (st) st.textContent = 'No se pudo leer el estado.'; }
+}
+async function saveHgcashCredentials() {
+    const t = (document.getElementById('hgcashCredToken') || {}).value || '';
+    const s = (document.getElementById('hgcashCredSecret') || {}).value || '';
+    const m = document.getElementById('hgcashCredMsg');
+    if (!t.trim() && !s.trim()) { if (m) { m.style.color = '#ff8080'; m.textContent = 'Pegá el token y/o el secreto.'; } return; }
+    if (!confirm('¿Cambiar la cuenta hgcash conectada? Desde ahora las cargas y los pagos automáticos van a usar estos datos.')) return;
+    if (m) { m.style.color = '#aaa'; m.textContent = 'Probando con hgcash…'; }
+    try {
+        const r = await authFetch('/api/admin/hgcash/credentials', { method: 'POST', body: JSON.stringify({ token: t.trim(), webhookSecret: s.trim() }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } return; }
+        document.getElementById('hgcashCredToken').value = '';
+        document.getElementById('hgcashCredSecret').value = '';
+        const acc = (j.accounts || []).map(a => (a.name || a.id) + ' (' + (a.currency || '') + ', ' + (a.status || '') + ')').join(' · ');
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado' + (acc ? ' — cuentas que ve el token: ' + acc : ''); }
+        showToast('Cuenta hgcash actualizada', 'success');
+        loadHgcashCredentials();
+        try { loadHgcashBalance(); } catch (_) {}
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+async function clearHgcashCredentials() {
+    if (!confirm('¿Borrar el token/secreto cargados en el panel y volver a usar los de AWS (SSM)?')) return;
+    const m = document.getElementById('hgcashCredMsg');
+    try {
+        const r = await authFetch('/api/admin/hgcash/credentials', { method: 'DELETE' });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo'); } return; }
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Volvió a usar AWS (SSM)'; }
+        loadHgcashCredentials();
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+window.loadHgcashCredentials = loadHgcashCredentials; window.saveHgcashCredentials = saveHgcashCredentials; window.clearHgcashCredentials = clearHgcashCredentials;
+
 async function loadHgcashConfig() {
     const form = document.getElementById('hgcashConfigForm');
     const movPanel = document.getElementById('hgcashMovementsPanel');
@@ -6214,6 +6267,7 @@ async function loadHgcashConfig() {
         }
         if (form) form.style.display = '';
         if (movPanel) movPanel.style.display = '';
+        loadHgcashCredentials(); // #320
         loadHgcashMovements(1);
         loadHgcashBalance();
         startHgcashLive();
