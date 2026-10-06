@@ -8,6 +8,11 @@
 
 ## Sesión 2026-10-06
 
+### 330. `docs/ESPEC-HGCASH-PANEL.md` — espec portable de hgcash desde el panel (#320 + #326)
+- Owner: "pasame para copiar y pegar en otro proyecto todo lo de hgcash que implementamos".
+  Doc generado desde el código vivo (bloques de `hgcashService.js`, `server.js`, el HTML y
+  el JS del panel), con dónde va cada pieza, requisitos previos, operación y pruebas.
+
 ### 329. Cashback instantáneo (tipo Stake, #254) RETIRADO
 - Owner: "sacá lo del cashback tipo Stake, que eso no se va a usar nunca".
 - Regla #235 del owner (borrar si no hay riesgo, dormir si lo hay): se BORRÓ lo visible y se

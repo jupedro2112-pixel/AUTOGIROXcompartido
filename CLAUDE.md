@@ -61,6 +61,8 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   **muertos**, sin consumidores. Ver la nota de migración arriba.
 - `docs/ESPEC-ROLLOVER-GLOBAL-Y-MULTICUENTA-TITULAR.md` — espec portable del rollover
   global de bonos (#278) y del cruce de multicuenta por titular del comprobante (#279).
+- `docs/ESPEC-HGCASH-PANEL.md` — espec portable (código tal cual) de hgcash desde el
+  panel: credenciales cifradas (#320) y reenvío de webhooks a otras páginas (#326).
 - `docs/ESPEC-REEMBOLSO-1GIROX.md` — cómo DEBE funcionar el reembolso/cashback sobre
   plata real (fórmula, datos de la API, casos de prueba) — portable a otros repos 1girox.
 - `docs/CLONACION-PASO-A-PASO.txt` — runbook probado para clonar TODO el proyecto a
