@@ -9338,6 +9338,23 @@ app.get('/api/admin/refund-tiers', authMiddleware, adminMiddleware, async (req, 
   }
 });
 
+// #325: interruptor del reembolso DIARIO solo (botón del panel que guarda al
+// instante). El POST de refund-tiers lo sigue aceptando junto con las escaleras.
+app.post('/api/admin/refund-daily', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Solo el admin general puede encender/apagar el reembolso diario.' });
+    }
+    const enabled = !!(req.body && req.body.enabled === true);
+    await Config.set(REFUND_DAILY_CONFIG_KEY, enabled, req.user.username);
+    logger.info(`[refund-tiers] reembolso DIARIO ${enabled ? 'ENCENDIDO' : 'APAGADO'} por ${req.user.username}`);
+    res.json({ success: true, dailyEnabled: enabled });
+  } catch (error) {
+    logger.error(`Error guardando refund-daily: ${error.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
 app.post('/api/admin/refund-tiers', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {

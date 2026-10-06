@@ -8,6 +8,19 @@
 
 ## Sesión 2026-10-06
 
+### 325. Reembolso diario: BOTÓN "Apagar / Encender" que guarda al instante (el tilde no se encontraba)
+- Owner: "no encuentro para apagar el reembolso diario". El interruptor existía (#297) pero
+  era un tilde chico pegado a un título dentro de la card "Rangos de reembolso", y recién
+  aplicaba al tocar "Guardar rangos" mucho más abajo.
+- Panel (admin-sw v72): el recuadro de arriba de esa card ahora dice "☀️ Reembolso DIARIO:
+  🟢 ACTIVO / 🔴 APAGADO" con un botón rojo "⏻ Apagar reembolso diario" (verde "Encender"
+  cuando está apagado). Confirma y guarda solo; re-pinta únicamente ese recuadro, así no se
+  pierden cambios sin guardar en las escaleras. "Guardar rangos" manda el estado vigente.
+- Backend: `POST /api/admin/refund-daily` `{enabled}` (solo admin general) → mismo
+  `Config['refundDailyEnabled']`. El resto no cambia: apagado = la PWA oculta el diario y el
+  claim se rechaza; semanal y mensual siguen.
+- **Probado:** `node --check` (server.js, admin.js, admin-sw.js). **Back necesita deploy.**
+
 ### 324. Bono de bienvenida (1ª carga): % + TOPE + % del excedente, los tres editables — el tope vale para cualquier %
 - Owner (captura de la card del panel): "quiero que el bono de bienvenida sea de 50% y llegue
   a un tope y después de ese tope sea un 25%; que también sea modificable".

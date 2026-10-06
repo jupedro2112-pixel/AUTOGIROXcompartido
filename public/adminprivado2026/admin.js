@@ -5998,6 +5998,45 @@ function _refundTierRowHtml(t) {
     </div>`;
 }
 
+// #297/#325: interruptor del reembolso DIARIO. Es un BOTÓN que guarda al instante
+// (owner 2026-10-06: "no encuentro para apagar el reembolso diario" — antes era un
+// tilde chico que recién aplicaba con "Guardar rangos"). Solo re-pinta su recuadro,
+// así no se pierden cambios sin guardar en las escaleras.
+function _refundDailyBoxHtml() {
+    const on = _refundDailyEnabled;
+    return `<div id="refundDailyBox" style="margin-bottom:14px;padding:12px;background:rgba(224,168,0,0.06);border:1px solid ${on ? 'rgba(0,200,83,0.5)' : 'rgba(255,107,107,0.6)'};border-radius:8px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <div style="font-size:14px;font-weight:bold;color:${on ? '#00c853' : '#ff6b6b'};">☀️ Reembolso DIARIO: ${on ? '🟢 ACTIVO' : '🔴 APAGADO'}</div>
+            <button type="button" id="refundDailyToggleBtn" onclick="toggleRefundDaily()" style="padding:8px 14px;border:none;border-radius:8px;font-weight:bold;cursor:pointer;color:#fff;background:${on ? '#d32f2f' : '#2e7d32'};">${on ? '⏻ Apagar reembolso diario' : '⏻ Encender reembolso diario'}</button>
+        </div>
+        <div style="color:#ddd;font-size:12px;margin-top:8px;">${on
+            ? 'El cliente puede reclamar todos los días lo que perdió AYER. Se guarda al tocar el botón.'
+            : 'El cliente NO ve el reembolso diario ni puede reclamarlo; quedan el semanal y el mensual. La escalera y el mínimo del Diario de abajo no se usan mientras esté apagado.'}</div>
+        <div style="color:#aaa;font-size:11px;margin-top:6px;line-height:1.5;">Regla (owner 2026-09-24): el <b>diario</b> paga la pérdida de ayer sin mirar días anteriores. El <b>semanal</b> toma la pérdida NETA de la semana pasada (las ganancias netean) y <b>descuenta lo ya reembolsado por los diarios</b>: si reclamó todos los días → $0; si se olvidó un día → ese día entra. El <b>mensual</b> descuenta diarios + semanales del mes. El % sale de la pérdida total del período y se aplica sobre lo que queda.</div>
+    </div>`;
+}
+async function toggleRefundDaily() {
+    const apagar = _refundDailyEnabled;
+    const aviso = apagar
+        ? '¿APAGAR el reembolso DIARIO?\n\n• El cliente deja de ver el reembolso diario y no puede reclamarlo\n• El semanal y el mensual siguen funcionando (y vuelven a cubrir toda la pérdida del período)\n\nSe aplica al instante.'
+        : '¿ENCENDER el reembolso DIARIO?\n\n• El cliente puede reclamar cada día lo que perdió AYER\n• El semanal y el mensual descuentan lo ya reembolsado por los diarios\n\nSe aplica al instante.';
+    if (!confirm(aviso)) return;
+    const btn = document.getElementById('refundDailyToggleBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Guardando…'; }
+    try {
+        const r = await authFetch('/api/admin/refund-daily', { method: 'POST', body: JSON.stringify({ enabled: !apagar }) });
+        const j = await r.json();
+        if (!r.ok || !j.success) { showToast(j.error || 'No se pudo guardar', 'error'); }
+        else {
+            _refundDailyEnabled = j.dailyEnabled === true;
+            showToast(_refundDailyEnabled ? 'Reembolso diario ENCENDIDO' : 'Reembolso diario APAGADO', 'success');
+        }
+    } catch (e) { showToast('Error de conexión', 'error'); }
+    const box = document.getElementById('refundDailyBox');
+    if (box) box.outerHTML = _refundDailyBoxHtml();
+}
+window.toggleRefundDaily = toggleRefundDaily;
+
 function renderRefundTiersEditor(tiersByPeriod, minimums, dailyEnabled) {
     const cont = document.getElementById('refundTiersEditors');
     if (!cont) return;
@@ -6019,13 +6058,7 @@ function renderRefundTiersEditor(tiersByPeriod, minimums, dailyEnabled) {
                 <input type="number" id="refundMinMonthly" value="${minVal('monthly', 5000)}" min="0" step="1" style="width:100px;"></label>
         </div>
     </div>`;
-    // #297: interruptor del DIARIO + explicación de la regla anti "reembolso de reembolso".
-    const dailyHtml = `<div style="margin-bottom:14px;padding:10px;background:rgba(224,168,0,0.06);border:1px solid rgba(224,168,0,0.35);border-radius:8px;">
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:bold;cursor:pointer;">
-            <input type="checkbox" id="refundDailyEnabled" ${_refundDailyEnabled ? 'checked' : ''} style="accent-color:#e0a800;"> ☀️ Reembolso DIARIO activo (lo que perdió AYER, día por día)
-        </label>
-        <div style="color:#aaa;font-size:11px;margin-top:6px;line-height:1.5;">Regla (owner 2026-09-24): el <b>diario</b> paga la pérdida de ayer sin mirar días anteriores. El <b>semanal</b> toma la pérdida NETA de la semana pasada (las ganancias netean) y <b>descuenta lo ya reembolsado por los diarios</b>: si reclamó todos los días → $0; si se olvidó un día → ese día entra. El <b>mensual</b> descuenta diarios + semanales del mes. El % sale de la pérdida total del período y se aplica sobre lo que queda.</div>
-    </div>`;
+    const dailyHtml = _refundDailyBoxHtml();
     cont.innerHTML = dailyHtml + minsHtml + REFUND_TIER_PERIODS.map((p) => {
         const tiers = (tiersByPeriod && tiersByPeriod[p.key]) || [];
         return `<div style="margin-bottom:14px;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;">
@@ -6101,7 +6134,7 @@ async function saveRefundTiers() {
         weekly: _collectRefundTiers('weekly'),
         monthly: _collectRefundTiers('monthly'),
         minimums: { daily: minDaily, weekly: minWeekly, monthly: minMonthly },
-        dailyEnabled: !!(document.getElementById('refundDailyEnabled') || {}).checked
+        dailyEnabled: _refundDailyEnabled // #325: lo cambia el botón del recuadro (guarda solo); acá va el estado vigente
     };
     if (!confirm('¿Guardar los rangos y mínimos de reembolso? Se aplican AL INSTANTE a los reclamos nuevos y a lo que el cliente ve en su perfil.')) return;
     try {

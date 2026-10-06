@@ -811,7 +811,7 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   reclamo (ya neta de lo previo); el % sale de la pérdida total del período y se
   aplica sobre lo que queda. El status manda `alreadyRefunded` (BASE de pérdida ya
   cubierta) y `alreadyPaid` (PLATA cobrada en esos reclamos, #316) — al cliente se le
-  muestra `alreadyPaid`; mostrarle la base confundía ("Ya reembolsado $159.222"). Interruptor `Config['refundDailyEnabled']` (default ON).
+  muestra `alreadyPaid`; mostrarle la base confundía ("Ya reembolsado $159.222"). Interruptor `Config['refundDailyEnabled']` (default ON; botón "Apagar/Encender reembolso diario" de la card de rangos → `POST /api/admin/refund-daily`, guarda al instante, #325).
   **Requieren la APP instalada (#301):** `_refundAppGate` (token FCM `standalone`,
   mismo criterio que la ruleta diaria) → `needsApp` en status y en el claim.
   El diario se había eliminado el 2026-08-07 y volvió el 2026-09-24. **Desde
