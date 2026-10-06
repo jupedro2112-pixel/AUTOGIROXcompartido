@@ -3765,7 +3765,7 @@ VIP.ui.openRewardsHub = function(focus) {
       '<div style="text-align:center;margin:6px 0 18px;">' +
         '<div style="font-size:34px;line-height:1;">🎁</div>' +
         '<div style="font-size:22px;font-weight:900;color:#fff;letter-spacing:0.5px;margin-top:4px;">TUS PREMIOS</div>' +
-        '<div style="font-size:12px;color:#9aa4b0;margin-top:2px;">Ruletas, bonos y cashback — todo acá</div>' +
+        '<div style="font-size:12px;color:#9aa4b0;margin-top:2px;">Ruletas, bonos y reembolsos — todo acá</div>' +
       '</div>' +
       '<div style="display:flex;flex-direction:column;gap:14px;">' + cards + '</div>' +
     '</div>';
@@ -3789,6 +3789,10 @@ VIP.ui.closeRewardsHub = function(silent) {
 // cliente cada minuto y medio (no come el rate limit de 60/min). ----
 VIP.ui._rwStartPolling = function() {
   VIP.ui._rwStopPolling();
+  // 🪦 #329: el cashback instantáneo fue retirado → sin cashback habilitado no
+  // hay nada que refrescar (antes pegaba a /api/cashback/status cada 60 s).
+  const _cb0 = VIP.ui._rwSummary && VIP.ui._rwSummary.cashback;
+  if (!_cb0 || _cb0.enabled !== true) return;
   VIP.ui._rwPollCashback();
   VIP.ui._rwPollTimer = setInterval(function() {
     if (document.hidden) return;

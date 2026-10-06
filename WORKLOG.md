@@ -8,6 +8,26 @@
 
 ## Sesión 2026-10-06
 
+### 329. Cashback instantáneo (tipo Stake, #254) RETIRADO
+- Owner: "sacá lo del cashback tipo Stake, que eso no se va a usar nunca".
+- Regla #235 del owner (borrar si no hay riesgo, dormir si lo hay): se BORRÓ lo visible y se
+  dejó DORMIDO lo que está trenzado con la plata.
+  - **Borrado:** card "📉 Cashback instantáneo" del panel (HTML + `loadInstantCashbackCfg` /
+    `saveInstantCashback`), la mención en la card del rollover, el poll de
+    `/api/cashback/status` del hub (antes cada 60 s con el hub abierto) y el subtítulo del
+    hub ("Ruletas, bonos y reembolsos").
+  - **Apagado para siempre:** `getInstantCashbackConfig()` devuelve `enabled:false` pase lo
+    que pase en `Config['instantCashback']`; `GET/POST /api/admin/instant-cashback` → 410.
+    Con eso `/api/cashback/status` responde `{enabled:false}`, el claim rechaza, el resumen
+    del hub no consulta netwin y la tarjeta pasa a "Tus Reembolsos" (#298) como ya hacía
+    con el cashback apagado.
+  - **Dormido (no tocado):** `_cashbackStateToday`, `_cashbackPaidBetween` y el descuento en
+    los reembolsos (suma 0), modelo `CashbackClaim`, campos `User.cashbackCarry*`, label
+    "📉 reembolso instantáneo" de Transacciones (filas históricas). Si algún día se quiere
+    borrar del todo, es una tanda aparte sobre los handlers de reembolsos.
+- **Probado:** `node --check` (server.js, ui.js, admin.js, ambos SW), divs del panel
+  balanceados. **Back necesita deploy.** SW v198, admin-sw v76.
+
 ### 328. Prefijo de los usuarios nuevos editable desde el panel (card en Configuración, default "g1")
 - Owner: "que los usuarios que se creen de la landing se creen con g1NOMBRE3dígitos; si crea
   usuario el panel de admin que arranque con g1 (modificable); que se pueda cambiar el inicio

@@ -5,7 +5,8 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-06** — reenvío de webhooks hgcash desde el panel (#326, §5).
+> Última actualización: **2026-10-06** — cashback instantáneo retirado (#329, §5).
+> Antes ese mismo día: reenvío de webhooks hgcash desde el panel (#326, §5).
 > Antes ese mismo día: tope del bono de bienvenida para cualquier % (#324, §5).
 > Antes ese mismo día: trampas del entorno EB clonado (#323, §9).
 > Antes ese mismo día: interruptores de SMS y registro (#322: §3, §5, §6,
@@ -736,8 +737,11 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   consumido con `claimDailyRoulettePercent`/`revert…` en carga manual (prioridad:
   bonus agente > bienvenida > diaria > 1ª carga) y hgcash. `DailyRouletteSpin` suma
   `prizeType/prizePct/rolloverX` y status `percent_pending`.
-  **Cashback instantáneo:** `Config['instantCashback']` {pct 5, rolloverX 2, minArs 300,
-  maxDailyArs 50000} (`GET/POST /api/admin/instant-cashback`, card en el panel).
+  **Cashback instantáneo: 🪦 RETIRADO (#329, 2026-10-06).** `getInstantCashbackConfig()`
+  devuelve siempre `enabled:false`, la card del panel se eliminó y
+  `GET/POST /api/admin/instant-cashback` responden 410. Lo de abajo queda como referencia
+  del código DORMIDO (`Config['instantCashback']` {pct 5, rolloverX 2, minArs 300,
+  maxDailyArs 50000}).
   `reclamable = max(0, pct×(netwinHoy − cobradoHoy) − cobradoHoy)` (netwin casino del
   día ART vía Partner API; sin "reembolso del reembolso"). Reclamo: modelo
   `CashbackClaim` (índice único userId+dateKey+seq), reference `vip-cbk-<user>-<día>-<seq>`

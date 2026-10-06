@@ -13108,11 +13108,13 @@ app.post('/api/admin/bonus-rollover', authMiddleware, adminMiddleware, async (re
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
 
+// 🪦 #329: el cashback instantáneo fue retirado (owner). Config y card eliminadas.
 app.get('/api/admin/instant-cashback', authMiddleware, adminMiddleware, async (req, res) => {
-  try { res.json(await getInstantCashbackConfig()); }
-  catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+  res.status(410).json({ error: 'El cashback instantáneo fue retirado (#329).' });
 });
 app.post('/api/admin/instant-cashback', authMiddleware, adminMiddleware, async (req, res) => {
+  return res.status(410).json({ error: 'El cashback instantáneo fue retirado (#329).' });
+  // eslint-disable-next-line no-unreachable
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
     const b = req.body || {};
@@ -13336,13 +13338,19 @@ app.post('/api/welcome-roulette/spin', authMiddleware, authLimiter, async (req, 
 // apostarlo. Lo cobrado acá se descuenta del reembolso semanal/mensual.
 // Config editable en panel: Config['instantCashback'].
 // ============================================================
+// 🪦 #329 (owner 2026-10-06): "sacá lo del cashback tipo Stake, eso no se va a usar
+// nunca". Queda APAGADO para siempre: `enabled` es false pase lo que pase en la
+// base, la card del panel y la tarjeta del hub se eliminaron y los endpoints de
+// config responden 410. El resto del código (estado, reclamo, descuento en los
+// reembolsos, modelo CashbackClaim) se conserva DORMIDO: los reclamos históricos
+// siguen en Transacciones y el descuento de reembolsos simplemente suma 0.
 const INSTANT_CASHBACK_DEFAULT = { enabled: false, pct: 5, rolloverX: 2, minArs: 300, maxDailyArs: 50000 };
 async function getInstantCashbackConfig() {
   try {
     const raw = await getConfig('instantCashback');
     if (raw && typeof raw === 'object') {
       return {
-        enabled: raw.enabled === true,
+        enabled: false, // #329: retirado — nunca más true
         pct: Math.min(50, Math.max(0, Number(raw.pct) || 0)) || INSTANT_CASHBACK_DEFAULT.pct,
         rolloverX: Math.min(50, Math.max(0, Math.round(Number(raw.rolloverX)))) || 0,
         minArs: Math.max(0, Math.round(Number(raw.minArs))) || 0,

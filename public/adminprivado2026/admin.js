@@ -5947,7 +5947,6 @@ async function loadCBUConfig() {
     loadWelcomeCodeConfig();
     // Cargar la config de la ruleta de bienvenida (solo admin general)
     loadWelcomeRoulette();
-    loadInstantCashbackCfg();
     loadBonusRolloverCfg(); // #278
     loadAccessSwitches(); // #322
     loadUsernamePrefixCard(); // #328
@@ -7048,41 +7047,9 @@ window.drUpdateOdds = drUpdateOdds;
 window.saveDailyRoulette = saveDailyRoulette;
 window.loadDailyRouletteCfg = loadDailyRouletteCfg;
 
-// ====== CASHBACK instantáneo (#254) ======
-async function loadInstantCashbackCfg() {
-    const form = document.getElementById('cashbackForm');
-    const header = document.getElementById('cashbackHeader');
-    try {
-        const r = await authFetch('/api/admin/instant-cashback');
-        if (!r.ok) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; return; }
-        const cfg = await r.json();
-        if (form) form.style.display = '';
-        if (header) header.style.display = '';
-        const en = document.getElementById('cbkEnabled');
-        if (en) en.checked = cfg.enabled === true;
-        const set = function(id, v) { const el = document.getElementById(id); if (el && v != null) el.value = v; };
-        set('cbkPct', cfg.pct); set('cbkRoll', cfg.rolloverX); set('cbkMin', cfg.minArs); set('cbkMax', cfg.maxDailyArs);
-    } catch (e) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
-}
-async function saveInstantCashback() {
-    try {
-        const r = await authFetch('/api/admin/instant-cashback', {
-            method: 'POST',
-            body: JSON.stringify({
-                enabled: document.getElementById('cbkEnabled').checked,
-                pct: Number(document.getElementById('cbkPct').value) || 0,
-                rolloverX: Number(document.getElementById('cbkRoll').value) || 0,
-                minArs: Number(document.getElementById('cbkMin').value) || 0,
-                maxDailyArs: Number(document.getElementById('cbkMax').value) || 0
-            })
-        });
-        const j = await r.json();
-        if (!r.ok) { showToast(j.error || 'No se pudo guardar', 'error'); return; }
-        showToast('Cashback guardado', 'success');
-    } catch (e) { showToast('Error de conexión', 'error'); }
-}
-window.saveInstantCashback = saveInstantCashback;
-window.loadInstantCashbackCfg = loadInstantCashbackCfg;
+// 🪦 #329: acá vivían loadInstantCashbackCfg/saveInstantCashback (card del cashback
+// instantáneo, #254). Retirado por el owner; el label 'instant_cashback' de
+// Transacciones queda para las filas históricas.
 
 // ---- Rollover GLOBAL de bonos (#278) ----
 // Radios x0/x2/x3/x5/x10. Los que la plataforma NO permite (bonus.multipliers

@@ -119,7 +119,7 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   día por día; el semanal y el mensual restan la BASE ya reembolsada
   (`RefundClaim.netAmount` = base efectivamente reembolsada, no la pérdida bruta).
 - **Regalos = BONO de 1girox (#266, 2026-09-07).** Ruleta (bienvenida/diaria),
-  reembolsos, cashback, fueguito, rakeback, nivel VIP y comisiones de referidos van por
+  reembolsos, fueguito, rakeback, nivel VIP y comisiones de referidos van por
   `girox.creditGift()` → `POST /players/{u}/bonus` con el rollover del flujo (figuran
   como **Bono** en el panel de 1girox, no como Carga). Rollover 0 = regalo directo
   (v1.10: disponible al instante, no pisa nada). Con rollover > 0 el bono PISA a un bono
@@ -158,7 +158,8 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   devuelve `logout_url`. Todo depósito SIN bono nuestro lleva `no_bonus:true` para que
   1girox no aplique sus campañas automáticas por herencia. `/stats` trae
   `bonus.granted/still_locked` (bono OTORGADO en el rango, #274): la base de reembolsos
-  es `netwin − granted` (cashback: máximo con la suma local de regalos). Manual: pedir
+  es `netwin − granted`. (El cashback instantáneo tipo Stake se RETIRÓ en #329: código
+  dormido, siempre apagado — no reactivarlo.) Manual: pedir
   `Partner-API-Manual_v_1.15.pdf` al owner (no está en el repo; el bloque `bonus` está
   en la sección 2.10 del manual actualizado que mandó soporte el 2026-09-10).
 - **No hay NINGUNA sesión que renovar.** Auth por `X-Api-Key` fija en todo, incluido
