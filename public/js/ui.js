@@ -3183,7 +3183,8 @@ function _rwPeriodRefundsBody() {
     if (d.needsApp) status = '<span style="color:#ffd479;font-weight:800;">📲 Necesitás la app instalada + notificaciones activas</span>';
     else if (ok) status = '<span style="color:#26e07f;font-weight:800;">¡Listo para reclamar!</span>';
     else if (amt > 0 && d.belowMinimum) status = 'Mínimo para cobrar ' + _rwFmt(d.minAmount) + (r.key === 'daily' ? ' · entra en el semanal' : '');
-    else if (amt <= 0 && d.alreadyRefunded > 0 && d.netAmount > 0) status = '<span style="color:#7fe07f;">✅ Ya reembolsado (' + _rwFmt(d.alreadyRefunded) + ')</span>';
+    // #316: no mostrar la BASE de pérdida (parecía plata a cobrar) sino lo COBRADO.
+    else if (amt <= 0 && d.alreadyRefunded > 0 && d.netAmount > 0) status = '<span style="color:#7fe07f;">✅ Ya lo cobraste con tus reembolsos ' + (r.key === 'weekly' ? 'diarios' : 'diarios y semanales') + (d.alreadyPaid > 0 ? ' (' + _rwFmt(d.alreadyPaid) + ')' : '') + '</span>';
     else if (amt <= 0) status = 'Sin pérdida en el período';
     else if (d.nextClaim) status = '⏰ Disponible en ' + _rwUntil(d.nextClaim);
     else status = 'No disponible ahora';

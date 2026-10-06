@@ -267,8 +267,8 @@ VIP.refunds = (function () {
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-size: 20px;">✅</span>
                     <div>
-                        <p style="color: #7fe07f; font-weight: bold; margin: 0; font-size: 12px;">Ya reembolsaste $${Number(typeData.alreadyRefunded).toLocaleString()} de esta pérdida</p>
-                        <p style="color: #ccc; margin: 0; font-size: 11px;">${type === 'weekly' ? 'con el reembolso diario' : 'con los reembolsos diarios y semanales'}. Acá cobrás el ${typeData.percentage}% de lo que queda: <strong>$${Number(typeData.remaining || 0).toLocaleString()}</strong>.</p>
+                        <p style="color: #7fe07f; font-weight: bold; margin: 0; font-size: 12px;">Ya cobraste ${typeData.alreadyPaid > 0 ? '$' + Number(typeData.alreadyPaid).toLocaleString() + ' ' : ''}${type === 'weekly' ? 'con el reembolso diario' : 'con los reembolsos diarios y semanales'}</p>
+                        <p style="color: #ccc; margin: 0; font-size: 11px;">Esos reembolsos ya cubrieron $${Number(typeData.alreadyRefunded).toLocaleString()} de la pérdida de este período (cada pérdida se reembolsa una sola vez). Acá cobrás el ${typeData.percentage}% de lo que queda: <strong>$${Number(typeData.remaining || 0).toLocaleString()}</strong>.</p>
                     </div>
                 </div>`;
         }
@@ -379,7 +379,7 @@ VIP.refunds = (function () {
         }
 
         if (typeData.potentialAmount <= 0 && typeData.alreadyRefunded > 0 && typeData.netAmount > 0) {
-            extraInfo.innerHTML = '<span style="color: #7fe07f;">🎉 Ya reembolsaste toda tu pérdida de este período con los reembolsos anteriores. No queda nada por cobrar acá.</span>';
+            extraInfo.innerHTML = '<span style="color: #7fe07f;">🎉 Toda tu pérdida de este período ya te la reembolsamos con los reembolsos ' + (type === 'weekly' ? 'diarios' : 'diarios y semanales') + (typeData.alreadyPaid > 0 ? ' (cobraste $' + Number(typeData.alreadyPaid).toLocaleString() + ')' : '') + '. Cada pérdida se reembolsa una sola vez, así que acá no queda nada por cobrar.</span>';
             claimBtn.disabled = true;
             claimBtn.textContent = '✅ Ya reembolsado';
             claimBtn.style.background = 'linear-gradient(135deg, #666 0%, #444 100%)';
@@ -661,7 +661,7 @@ VIP.refunds = (function () {
                             <span style="font-size:12px;font-weight:900;color:${t.color};">${t.pct}%</span>
                         </div>
                         <div style="font-size:11px;color:#aaa;margin-top:3px;">
-                            Perdiste ${money(d.netAmount)}${d.alreadyRefunded > 0 ? ` · ya reembolsado ${money(d.alreadyRefunded)}` : ''} · te corresponden <strong style="color:#7fe07f;">${money(d.potentialAmount)}</strong>
+                            Perdiste ${money(d.netAmount)}${d.alreadyRefunded > 0 ? ` · ya cubierto por reembolsos anteriores${d.alreadyPaid > 0 ? ` (cobraste ${money(d.alreadyPaid)})` : ''}` : ''} · te corresponden <strong style="color:#7fe07f;">${money(d.potentialAmount)}</strong>
                         </div>
                         ${falta}
                     </div>`;

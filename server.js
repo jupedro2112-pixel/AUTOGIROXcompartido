@@ -8087,6 +8087,16 @@ async function _dailyRefundBaseBetween(userId, fromStr, toStr) {
   ]);
   return Math.max(0, (agg && agg[0] && agg[0].t) || 0);
 }
+// #316: PLATA efectivamente cobrada (RefundClaim.amount) por reclamos de `type`
+// cuyo periodKey cae en el rango — para mostrarle al cliente cuánto COBRÓ (no la
+// base de pérdida, que confundía: "Ya reembolsado ($159.222)" parecía plata).
+async function _refundPaidByKeys(userId, type, keyFrom, keyTo) {
+  const agg = await RefundClaim.aggregate([
+    { $match: { userId: String(userId), type, periodKey: { $gte: keyFrom, $lte: keyTo } } },
+    { $group: { _id: null, t: { $sum: '$amount' }, n: { $sum: 1 } } }
+  ]);
+  return { paid: Math.max(0, (agg && agg[0] && agg[0].t) || 0), n: (agg && agg[0] && agg[0].n) || 0 };
+}
 // Base ya reembolsada por SEMANALES cuya semana arranca en el mes 'YYYY-MM'.
 async function _weeklyRefundBaseInMonth(userId, ym) {
   const agg = await RefundClaim.aggregate([
@@ -8175,6 +8185,14 @@ app.get('/api/refunds/status', authMiddleware, async (req, res) => {
     // #297: lo que ya se reembolsó (base) dentro de cada período por los
     // reembolsos más chicos → el período grande solo paga lo que falta.
     let weeklyBaseDone = 0, monthlyBaseDone = 0;
+    let weeklyPaidPrev = { paid: 0, n: 0 }, monthlyPaidPrev = { paid: 0, n: 0 }; // #316
+    try {
+      weeklyPaidPrev = await _refundPaidByKeys(userId, 'daily', 'daily:' + lastWeekRange.fromDateStr, 'daily:' + lastWeekRange.toDateStr);
+      const _mD = await _refundPaidByKeys(userId, 'daily', 'daily:' + lastMonthRange.fromDateStr, 'daily:' + lastMonthRange.toDateStr);
+      const _ym = lastMonthRange.fromDateStr.slice(0, 7);
+      const _mW = await _refundPaidByKeys(userId, 'weekly', 'weekly:' + _ym + '-01', 'weekly:' + _ym + '-31');
+      monthlyPaidPrev = { paid: _mD.paid + _mW.paid, n: _mD.n + _mW.n };
+    } catch (_) {}
     try {
       weeklyBaseDone = await _dailyRefundBaseBetween(userId, lastWeekRange.fromDateStr, lastWeekRange.toDateStr);
       monthlyBaseDone = (await _dailyRefundBaseBetween(userId, lastMonthRange.fromDateStr, lastMonthRange.toDateStr)) +
@@ -8256,6 +8274,8 @@ app.get('/api/refunds/status', authMiddleware, async (req, res) => {
         potentialAmount: weeklyCalc.amount,
         netAmount: weeklyNetLoss,
         alreadyRefunded: weeklyBaseDone,   // #297: base ya cobrada por diarios
+        alreadyPaid: weeklyPaidPrev.paid,  // #316: PLATA cobrada en esos diarios
+        alreadyPaidCount: weeklyPaidPrev.n,
         remaining: weeklyRemaining,
         percentage: weeklyCalc.pct,
         tier: tierOut(weeklyCalc),
@@ -8271,6 +8291,8 @@ app.get('/api/refunds/status', authMiddleware, async (req, res) => {
         potentialAmount: monthlyCalc.amount,
         netAmount: monthlyNetLoss,
         alreadyRefunded: monthlyBaseDone,  // #297: base ya cobrada por diarios + semanales
+        alreadyPaid: monthlyPaidPrev.paid, // #316
+        alreadyPaidCount: monthlyPaidPrev.n,
         remaining: monthlyRemaining,
         percentage: monthlyCalc.pct,
         tier: tierOut(monthlyCalc),
@@ -13255,7 +13277,7 @@ app.get('/api/rewards/summary', authMiddleware, async (req, res) => {
     try {
       const wCfg = await getWelcomeRouletteConfig();
       const u = await User.findOne({ id: userId })
-        .select('welcomeRouletteStatus welcomeRoulettePrizeLabel welcomeRoulettePrizeType welcomeRoulettePrizeValue welcomeRouletteRolloverX welcomeRouletteSpunAt welcomeRouletteUsedAt welcomeRouletteUsedBy dailyRoulettePendingPct dailyRoulettePendingLabel createdByAgent acquisitionSource').lean();
+        .select('welcomeRouletteStatus welcomeRoulettePrizeLabel welcomeRoulettePrizeType welcomeRoulettePrizeValue welcomeRouletteRolloverX welcomeRouletteSpunAt welcomeRouletteUsedAt welcomeRouletteUsedBy dailyRoulettePendingPct dailyRoulettePendingLabel dailyRouletteWonAt createdByAgent acquisitionSource').lean();
       const already = u && u.welcomeRouletteStatus && u.welcomeRouletteStatus !== 'none';
       const _wEligible = _welcomeRouletteEligible(u); // #285
       out.welcome = {

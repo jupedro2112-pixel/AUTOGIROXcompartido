@@ -5,7 +5,9 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-02** — desvío de altas nuevas a otra campaña
+> Última actualización: **2026-10-06** — status de reembolsos devuelve `alreadyPaid`
+> (plata cobrada en diarios/semanales, #316, §5).
+> Antes: 2026-10-02 — desvío de altas nuevas a otra campaña
 > (`Campaign.newSignupsTo`, #315: §2 Campaign, §5 publisher_admin).
 > Antes: 2026-09-30 — limpieza de partes stale: regalos como BONO
 > (#266, §4.5/§5/§9), referidos 3% (#307, §4.6/§5), reembolso diario de vuelta (#297,
@@ -760,7 +762,9 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   diarios + semanales del mes (`_weeklyRefundBaseInMonth`, semana = la que arranca en
   el mes). `RefundClaim.netAmount` guarda la base EFECTIVAMENTE reembolsada en ese
   reclamo (ya neta de lo previo); el % sale de la pérdida total del período y se
-  aplica sobre lo que queda. Interruptor `Config['refundDailyEnabled']` (default ON).
+  aplica sobre lo que queda. El status manda `alreadyRefunded` (BASE de pérdida ya
+  cubierta) y `alreadyPaid` (PLATA cobrada en esos reclamos, #316) — al cliente se le
+  muestra `alreadyPaid`; mostrarle la base confundía ("Ya reembolsado $159.222"). Interruptor `Config['refundDailyEnabled']` (default ON).
   **Requieren la APP instalada (#301):** `_refundAppGate` (token FCM `standalone`,
   mismo criterio que la ruleta diaria) → `needsApp` en status y en el claim.
   El diario se había eliminado el 2026-08-07 y volvió el 2026-09-24. **Desde

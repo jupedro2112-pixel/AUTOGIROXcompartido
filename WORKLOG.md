@@ -4,7 +4,31 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-02**
+> **Última actualización: 2026-10-06**
+
+## Sesión 2026-10-06
+
+### 316. "Mi reembolso semanal figura pero no me lo pagaron" (gxsanti2007) + fix "vence en ya mismo"
+- **Caso:** el hub mostraba Semanal $0 "✅ Ya reembolsado ($159.222)". NO era un error
+  de pago: es la regla #297 — el cliente reclamó los DIARIOS de esa semana, que ya
+  cubrieron $159.222 de pérdida (base), y el semanal solo paga lo que queda (nada). Pero
+  el texto mostraba la BASE de pérdida como si fuera plata ya pagada/por pagar → el
+  cliente y el agente entendieron que le debían $159.222.
+- **Fix:** `/api/refunds/status` suma `alreadyPaid`/`alreadyPaidCount` en weekly/monthly
+  (`_refundPaidByKeys`: suma `RefundClaim.amount` de los diarios de la semana; en el
+  mensual diarios del mes + semanales que arrancan en el mes). Textos: hub "✅ Ya lo
+  cobraste con tus reembolsos diarios ($X)"; modal "Ya cobraste $X con el reembolso
+  diario · esos reembolsos ya cubrieron $base de la pérdida (cada pérdida se reembolsa
+  una sola vez)"; perfil "ya cubierto por reembolsos anteriores (cobraste $X)".
+  Cálculo sin cambios.
+- **Bug ruleta diaria:** el hub decía "vence en ya mismo" aunque el % tenía ~22 h por
+  delante. `/api/rewards/summary` no traía `dailyRouletteWonAt` en el select →
+  `pendingExpiresAt` null → countdown 0. Agregado al select. Solo era visual: el
+  vencimiento real (cron + claim) usa la base y estaba bien.
+- **Para soporte:** el detalle de lo cobrado está en el panel → Reembolsos reclamados
+  (filtrar por usuario: los diarios de la semana pasada).
+- **Probado:** `node --check` (server.js, ui.js, refunds.js, SW). SW → v191. **Back
+  necesita redeploy.**
 
 ## Sesión 2026-10-02
 
