@@ -681,6 +681,8 @@ function setupRoleBasedUI() {
     if (smsNavItem) {
         smsNavItem.style.display = role === 'admin' ? '' : 'none';
     }
+    // #322: con el SMS apagado (panel → SMS y registro) se oculta igual.
+    if (role === 'admin') loadAccessSwitches();
 
     // Cuentas Publicistas y Dashboard Publicistas: sólo admin general
     const paNavItem = document.querySelector('.nav-item-publisher-admins');
@@ -5881,6 +5883,7 @@ async function loadCBUConfig() {
     loadWelcomeRoulette();
     loadInstantCashbackCfg();
     loadBonusRolloverCfg(); // #278
+    loadAccessSwitches(); // #322
     // Cargar la config del bono de primera carga (solo admin general)
     loadFirstChargeBonus();
     // Cargar la config del banco automático (hgcash)
@@ -6963,6 +6966,77 @@ async function saveBonusRollover() {
 window.brPick = brPick;
 window.saveBonusRollover = saveBonusRollover;
 window.loadBonusRolloverCfg = loadBonusRolloverCfg;
+
+// ====== SMS y registro: interruptores (#322, solo admin general) ======
+// Config['accessSwitches'] vía GET/POST /api/admin/access-switches. El registro
+// solo puede abrirse con el SMS encendido (lo valida también el server).
+let _accessSwitches = null;
+function accessSwitchesSync() {
+    const sms = document.getElementById('asSms');
+    const reg = document.getElementById('asRegistration');
+    const hint = document.getElementById('asRegistrationHint');
+    if (!sms || !reg) return;
+    if (!sms.checked) reg.checked = false;
+    reg.disabled = !sms.checked;
+    if (hint) hint.style.display = sms.checked ? 'none' : 'block';
+}
+function _accessSwitchesRender(cfg) {
+    _accessSwitches = cfg;
+    const sms = document.getElementById('asSms');
+    const reg = document.getElementById('asRegistration');
+    const landing = document.getElementById('asLanding');
+    const line = document.getElementById('asStatusLine');
+    if (sms) sms.checked = cfg.smsEnabled === true;
+    if (reg) reg.checked = cfg.registrationEnabled === true;
+    if (landing) landing.checked = cfg.landingSignupEnabled !== false;
+    accessSwitchesSync();
+    if (line) {
+        line.textContent = (cfg.smsEnabled ? '🟢 SMS encendido' : '🔴 SMS apagado') + ' · ' +
+            (cfg.registrationOpen ? '🟢 registro abierto' : '🔴 registro cerrado') + ' · ' +
+            (cfg.landingSignupEnabled !== false ? '🟢 landing abierta' : '🔴 landing cerrada');
+        line.style.color = (cfg.smsEnabled && cfg.registrationOpen) ? '#00c853' : '#ffb74d';
+    }
+    // SMS Masivo: sin SMS no tiene sentido mostrarlo en el menú.
+    const smsNav = document.querySelector('.nav-item-sms-masivo');
+    if (smsNav && cfg.smsEnabled !== true) smsNav.style.display = 'none';
+    else if (smsNav && currentAdmin && currentAdmin.role === 'admin') smsNav.style.display = '';
+}
+async function loadAccessSwitches() {
+    const form = document.getElementById('accessSwitchesForm');
+    const header = document.getElementById('accessSwitchesHeader');
+    try {
+        const r = await authFetch('/api/admin/access-switches');
+        if (!r.ok) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; return; }
+        if (form) form.style.display = '';
+        if (header) header.style.display = '';
+        _accessSwitchesRender(await r.json());
+    } catch (e) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
+}
+async function saveAccessSwitches() {
+    const sms = document.getElementById('asSms').checked;
+    const reg = document.getElementById('asRegistration').checked;
+    const landing = document.getElementById('asLanding').checked;
+    const prev = _accessSwitches || {};
+    const cambios = [];
+    if (sms !== (prev.smsEnabled === true)) cambios.push(sms ? '• ENCENDER el SMS (la cuenta de Amazon tiene que tener SNS habilitado, si no los códigos no llegan)' : '• APAGAR el SMS (no se manda ningún código ni se exige teléfono verificado)');
+    if (reg !== (prev.registrationEnabled === true)) cambios.push(reg ? '• ABRIR el registro desde la app' : '• CERRAR el registro desde la app');
+    if (landing !== (prev.landingSignupEnabled !== false)) cambios.push(landing ? '• ABRIR las altas por la landing de pauta' : '• CERRAR las altas por la landing de pauta (los anuncios dejan de crear cuentas)');
+    if (!cambios.length) { showToast('No hay cambios para guardar', 'info'); return; }
+    if (!confirm('Vas a:\n\n' + cambios.join('\n') + '\n\n¿Confirmás?')) { _accessSwitchesRender(prev); return; }
+    try {
+        const r = await authFetch('/api/admin/access-switches', {
+            method: 'POST',
+            body: JSON.stringify({ smsEnabled: sms, registrationEnabled: reg, landingSignupEnabled: landing })
+        });
+        const j = await r.json();
+        if (!r.ok) { showToast(j.error || 'No se pudo guardar', 'error'); return; }
+        _accessSwitchesRender(j);
+        showToast('SMS y registro actualizados', 'success');
+    } catch (e) { showToast('Error de conexión', 'error'); }
+}
+window.accessSwitchesSync = accessSwitchesSync;
+window.saveAccessSwitches = saveAccessSwitches;
+window.loadAccessSwitches = loadAccessSwitches;
 
 // ====== Código de bienvenida de la Comunidad (bono sorpresa) ======
 // Código: solo admin general. Monto: admin general y depositor. Para los demás

@@ -722,6 +722,39 @@ document.addEventListener('change', function (ev) {
                             <div id="wrOddsHint" style="color:#8fb; font-size:11px; margin-top:6px;"></div>
                         </div>
 
+                        <!-- SMS y REGISTRO: interruptores (#322, solo admin general) -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="accessSwitchesHeader">
+                            <h3>📵 SMS y registro</h3>
+                        </div>
+                        <div class="cbu-form" id="accessSwitchesForm">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                Para cuando la cuenta de Amazon <b>no tiene el SMS (SNS) habilitado</b>. Con el SMS apagado no se
+                                manda ningún código, la app oculta todo lo de verificar teléfono / recuperar clave por SMS y
+                                <b>no se le exige teléfono verificado a nadie</b> (retiros incluidos). El registro desde la app
+                                verifica el teléfono por SMS, así que <b>solo se puede abrir con el SMS encendido</b>.
+                                Cuando Amazon habilite el SMS: encendé el SMS y después el registro. El cambio se ve en la app
+                                del cliente en la próxima carga (hasta 10 segundos en el server).
+                            </p>
+                            <div class="form-group">
+                                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input type="checkbox" id="asSms" style="width:auto;" onchange="accessSwitchesSync()"> 📱 SMS ACTIVADO (códigos de verificación, recuperar clave, SMS masivo)
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input type="checkbox" id="asRegistration" style="width:auto;"> 📝 REGISTRO desde la app ABIERTO (botón "Crear cuenta" + referidos)
+                                </label>
+                                <small id="asRegistrationHint" style="color:#ffb74d;font-size:11px;display:none;margin-top:4px;">Necesita el SMS encendido.</small>
+                            </div>
+                            <div class="form-group">
+                                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input type="checkbox" id="asLanding" style="width:auto;"> 🚀 Altas por la LANDING de pauta ABIERTAS (solo nombre, sin SMS)
+                                </label>
+                            </div>
+                            <div id="asStatusLine" style="font-size:13px;font-weight:bold;margin-bottom:10px;color:#aaa;">Cargando…</div>
+                            <button type="button" class="btn btn-primary" onclick="saveAccessSwitches()">💾 Guardar</button>
+                        </div>
+
                         <!-- ROLLOVER GLOBAL de bonos (#278, solo admin general) -->
                         <div class="panel-subheader" style="margin-top: 24px;" id="bonusRolloverHeader">
                             <h3>🎯 Rollover GLOBAL de bonos</h3>

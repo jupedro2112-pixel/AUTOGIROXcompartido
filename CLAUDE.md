@@ -73,9 +73,18 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   comprobantes IA, analítica publicistas…).
 - `public/` — PWA del cliente (namespace global `window.VIP`, SW único
   `firebase-messaging-sw.js`). `public/adminprivado2026/` — panel admin (~14k líneas
-  de admin.js, cookie httpOnly, SW propio `admin-sw.js` con scope /adminprivado2026/).
+  de admin.js, cookie httpOnly; su SW es `public/admin-sw.js`, scope /adminprivado2026/).
 
 ## Cosas que NO hay que romper (gotchas)
+
+- **SMS y auto-registro APAGADOS por default (#322, 2026-10-06):** el proyecto corre en
+  cuentas de AWS sin SNS. `Config['accessSwitches']` (panel → Configuración → "📵 SMS y
+  registro", solo admin general) prende/apaga SMS, registro de la PWA y altas por landing
+  (defaults OFF / OFF / ON). Con el SMS apagado nada llega a SNS, los endpoints de código
+  responden `SMS_DISABLED`, no se exige teléfono verificado (retiros incluidos) y el registro
+  no puede abrirse. Todo SMS nuevo pasa por los wrappers `generateAndSendOTP`/`sendSMS` de
+  server.js y su ruta va en `SMS_GATED_PATHS`; en el front se pregunta `VIP.flags.sms` /
+  `VIP.flags.signup`. No "arreglar" esos 403/503 en código: se prende desde el panel.
 
 - **Credenciales de hgcash (#320):** además de SSM, se pueden cargar desde el panel (cifradas
   en Config con clave derivada de JWT_SECRET; panel > SSM). Cambio de cuenta hgcash = panel →
@@ -123,8 +132,8 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   que pasar `ignoreGlobalRollover:true`. Si 1girox no permite el x elegido se usa el
   permitido siguiente hacia arriba.
 - **Roles:** `user`, `admin` (todo), `depositor` (solo cargas), `withdrawer` (solo
-  retiros), `publisher_admin` (solo crea usuarios de su publicista — lockdown via
-  `PUBLISHER_ADMIN_ALLOWED_PATHS`).
+  retiros), `comunidad` (clon de depositor, sin Pagos), `publisher_admin` (solo crea
+  usuarios de su publicista — lockdown via `PUBLISHER_ADMIN_ALLOWED_PATHS`).
 - **Auth:** JWT por header Authorization O por cookie httpOnly `admin_api_session`
   (el panel admin usa cookie).
 - **Referidos (#307 + #317):** comisión = % × netwin del referido; el % de CADA referidor
@@ -166,7 +175,7 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 - **Front frágil:** cientos de `onclick` inline dependen de funciones en `window.*`
   (no renombrar exports sin actualizar el HTML/strings). Tabla de usuarios del panel
   acoplada a `USERS_LIST_FIELDS` del backend (columna nueva ⇒ sumar campo al select).
-  Detalle completo de trampas en `docs/ARCHITECTURE.md` §7.
+  Detalle completo de trampas en `docs/ARCHITECTURE.md` §9.
 
 ## Flujo de trabajo del asistente
 

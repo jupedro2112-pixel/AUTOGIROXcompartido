@@ -8,6 +8,58 @@
 
 ## Sesión 2026-10-06
 
+### 322. SMS y auto-registro APAGADOS por default, con interruptores en el panel (cuenta de AWS sin SNS)
+- Owner: "voy a subir este proyecto en otro Amazon que no tengo SNS/SMS habilitado; sacamos esa
+  parte y deshabilitamos el auto-registro, que no haya forma de registrarse momentáneamente, y
+  que pueda activarse/desactivarse desde el panel para cuando lo habiliten".
+- **`Config['accessSwitches']`** `{smsEnabled, registrationEnabled, landingSignupEnabled}` —
+  defaults **SMS OFF / registro OFF / landing ON**. `getAccessSwitches()` (server.js, cache 10 s
+  por instancia; error de DB = todo apagado). `registrationOpen = sms && registro`: el registro
+  de la PWA verifica el teléfono por SMS (#141), así que NO se puede abrir sin SMS (el POST lo
+  rechaza y apagar el SMS cierra el registro).
+- **Backend:** (1) wrappers `generateAndSendOTP` / `sendSMS` en server.js: con el SMS apagado
+  no se llama a SNS ni se crea el OtpCode (son los DOS únicos caminos al servicio). (2) Un
+  middleware por PATH antes de las rutas de auth (`SMS_GATED_PATHS` /
+  `REGISTRATION_GATED_PATHS`): send/verify de OTP de cambio de clave, login por OTP, reset de
+  clave por SMS, verify-phone y SMS masivo → 503 `SMS_DISABLED`; `/api/auth/register` y
+  `send-register-otp` → 403 `REGISTRATION_DISABLED`. (3) Los candados de "teléfono verificado"
+  NO aplican con el SMS apagado (nadie podría verificar): retiro manual del agente,
+  `/api/movements/withdraw`, retiro self-service (`WITHDRAW_REQUIRE_SMS`) y bono de
+  instalación. (4) `change-password` ignora el teléfono que venga (el cambio voluntario pide la
+  clave actual; el obligatorio de primer ingreso no). (5) `/api/landing/signup` respeta
+  `landingSignupEnabled` (además del env `LANDING_SIGNUP_DISABLED`). (6) `GET
+  /api/config/access` público → `{smsEnabled, registrationEnabled}`; `GET/POST
+  /api/admin/access-switches` (solo admin general, `Config.set` con quién lo cambió).
+- **PWA (SW v195, `?v=322` en config/auth/ui/withdraw.js):** `VIP.flags {sms, signup}` — un
+  inline del `<head>` aplica lo último que se supo (localStorage `vip_access_flags`, sin dato =
+  apagado) como clases `html.sms-off` / `html.signup-off`, y `config.js` lo refresca contra
+  `/api/config/access` (2 reintentos). CSS oculta: "Registrarse", tab "Crear cuenta",
+  "Recuperar contraseña", notas de verificar teléfono, banner y bloque de verificación, campo
+  de WhatsApp del cambio de clave. `VIP.ui.showModal` no abre `registerModal` (registro cerrado)
+  ni `resetPassModal` / `verifyPhoneModal` / `smsOfferModal` (SMS apagado) — cubre el link
+  `?ref=` y los onclick inline. Cambio de clave sin teléfono; retiro del modal viejo sin paso
+  de SMS; el popup de referidos no sale con el registro cerrado; título/burbuja del modo
+  invitado dicen "Ingresá a tu cuenta" / "INGRESAR".
+- **Panel (admin-sw v70):** card "📵 SMS y registro" en Configuración (arriba del rollover
+  global): 3 checks + Guardar con confirmación; el de registro se bloquea si el SMS está
+  apagado. "SMS Masivo" desaparece del menú con el SMS apagado.
+- **Lo que NO cambia:** login usuario+clave, links de acceso de un solo uso, altas por agente /
+  publisher_admin y la landing de pauta (queda ABIERTA: no usa SMS; se corta con su check).
+  El código de SMS/OTP sigue intacto: prender el interruptor lo devuelve tal cual estaba.
+- ⚠️ **El default apagado aplica a CUALQUIER entorno que despliegue este código** y cuya base no
+  tenga `accessSwitches` guardado: si otro entorno con SNS habilitado toma este commit, hay que
+  prender SMS + registro desde su panel. Si dos entornos comparten la MISMA Mongo, comparten
+  el interruptor.
+- Docs corregidos de paso (stale): `admin-sw.js` vive en `public/` (no en
+  `adminprivado2026/`), rol `comunidad`, trampas en ARCHITECTURE §9, default 3% de
+  `GIROX_REFERRAL_COMMISSION_PCT`, ruteo por key del dueño en el alta de publisher_admin.
+- **Probado:** `node --check` en los 8 JS tocados; HTML del panel y de la PWA balanceados;
+  lógica de los interruptores y wrappers probada aislada (default → `SMS_DISABLED`; ON → pasa;
+  registro ON con SMS OFF → cerrado). **Back necesita deploy.** PROBAR en el entorno nuevo:
+  abrir la PWA sin sesión → sin "Crear cuenta" ni "Recuperar contraseña"; `POST
+  /api/auth/register` por curl → 403; cliente de landing pide retiro → no le exige SMS; panel →
+  Configuración → card "SMS y registro" → encender SMS + registro → recargar la PWA → aparecen.
+
 ### 321. Texto de los SMS de código: marca 1GIROX, sin dominio (pedido de salida del sandbox SNS)
 - Owner va a pedir a AWS salir del sandbox de SMS (cuenta zamuxavier, sa-east-1) y el ejemplo
   de mensaje tiene que coincidir con lo real. `otpService.buildOtpMessage`: antes "VIPCARGAS:

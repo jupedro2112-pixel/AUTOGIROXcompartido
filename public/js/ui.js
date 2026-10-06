@@ -8,7 +8,21 @@ VIP.ui = (function () {
 
     // ---- Modal helpers ----
 
+    // #322: modales que no se abren con el registro cerrado / el SMS apagado
+    // (interruptores del panel, VIP.flags). Cubre TODOS los caminos que los
+    // abren (botones, link ?ref=, onclick inline) sin tocar cada uno.
+    const SMS_ONLY_MODALS = ['resetPassModal', 'verifyPhoneModal', 'smsOfferModal'];
+
     function showModal(modalId) {
+        const flags = VIP.flags || {};
+        if (modalId === 'registerModal' && flags.signup !== true) {
+            showToast('El registro de cuentas nuevas no está disponible por el momento.', 'info');
+            return;
+        }
+        if (SMS_ONLY_MODALS.includes(modalId) && flags.sms !== true) {
+            if (modalId !== 'smsOfferModal') showToast('La verificación por SMS no está disponible por el momento. Escribinos a soporte y te ayudamos.', 'info');
+            return;
+        }
         document.getElementById(modalId).classList.remove('hidden');
     }
 
@@ -631,6 +645,8 @@ VIP.ui = (function () {
         // localStorage con cooldown (no sessionStorage: iOS/Chrome restauran la pestaña y el
         // "una vez por apertura" no se disparaba nunca más). ?refpromo=1 fuerza mostrarlo.
         const force = /[?&]refpromo=1/.test(location.search || '');
+        // #322: con el registro cerrado (panel → SMS y registro) el invitado no podría crear su cuenta.
+        if (!force && !(VIP.flags && VIP.flags.signup === true)) { console.info('[ref-promo] no se muestra: registro cerrado'); return; }
         try {
             const last = Number(localStorage.getItem('vip_refPromoAt') || 0);
             if (!force && last && Date.now() - last < REF_PROMO_COOLDOWN_MS) { console.info('[ref-promo] ya mostrado hace ' + Math.round((Date.now() - last) / 60000) + ' min'); return; }
@@ -1100,7 +1116,7 @@ VIP.ui.enterCasinoGuest = function() {
   if (drawer) {
     drawer.querySelectorAll('.cwBar, .cwFoot').forEach(function(el) { if (el.id !== 'casinoCommunityRow') el.style.display = 'none'; });
     const bot = document.getElementById('casinoBotArea'); if (bot) bot.style.display = 'none';
-    const title = document.getElementById('casinoWidgetTitle'); if (title) title.textContent = 'Ingresá o creá tu cuenta';
+    const title = document.getElementById('casinoWidgetTitle'); if (title) title.textContent = (VIP.flags && VIP.flags.signup === true) ? 'Ingresá o creá tu cuenta' : 'Ingresá a tu cuenta';
     const body = document.getElementById('casinoChatDrawerBody');
     if (body) {
       let wrap = document.getElementById('guestAuthWrap');
@@ -1123,7 +1139,7 @@ VIP.ui.enterCasinoGuest = function() {
   }
   document.body.classList.add('guest-premium'); // skin de los modales (registro, recuperar, etc.)
   const bubble = document.getElementById('casinoSupportBubble');
-  if (bubble) { const lbl = bubble.querySelectorAll(':scope > span')[1]; if (lbl) { VIP.ui._guestBubbleLbl = lbl.textContent; lbl.textContent = '🔑 INGRESAR / REGISTRARTE'; } }
+  if (bubble) { const lbl = bubble.querySelectorAll(':scope > span')[1]; if (lbl) { VIP.ui._guestBubbleLbl = lbl.textContent; lbl.textContent = (VIP.flags && VIP.flags.signup === true) ? '🔑 INGRESAR / REGISTRARTE' : '🔑 INGRESAR'; } }
   setTimeout(function() { try { VIP.ui.openCasinoChat(); } catch (e) {} }, 300);
   return true;
 };

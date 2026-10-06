@@ -82,9 +82,75 @@ const _periodKey = require('./src/utils/periodKey');
 const { setGlobalReferralRate, getGlobalReferralRate, refreshReferralRateFromCommand, REFERRAL_PCT_COMMAND } = require('./src/utils/referralRate');
 const referralTiers = require('./src/services/referralTierService'); // niveles de % por referidos activos
 const { setRedisClient, getRedisClient } = require('./src/utils/redisClient');
-const { generateAndSendOTP, verifyOTP } = require('./src/services/otpService');
-const { sendSMS } = require('./src/services/smsService');
+const _otpService = require('./src/services/otpService');
+const _smsService = require('./src/services/smsService');
+const { verifyOTP } = _otpService;
 const { validateInternationalPhone, normalizePhoneKey } = require('./src/middlewares/security');
+
+// ============================================
+// INTERRUPTORES DE ACCESO: SMS y REGISTRO (#322)
+// ============================================
+// Owner 2026-10-06: el proyecto se sube a una cuenta de AWS SIN SNS/SMS
+// habilitado. Se apaga todo lo que depende del SMS y el auto-registro, con
+// interruptores en el panel (Configuración → "📵 SMS y registro", solo admin
+// general) para prenderlos cuando AWS habilite el SMS — sin deploy.
+//   smsEnabled           → default OFF. Apagado: NADA llega a SNS (los wrappers
+//                          de abajo cortan antes), los endpoints de código por
+//                          SMS responden SMS_DISABLED y los candados de
+//                          "teléfono verificado" no aplican (nadie podría
+//                          verificar). La PWA oculta todo lo de SMS.
+//   registrationEnabled  → default OFF. El registro de la PWA verifica el
+//                          teléfono por SMS (#141), así que SOLO abre con el
+//                          SMS encendido (`registrationOpen`).
+//   landingSignupEnabled → default ON (sin cambios): el alta solo-nombre de la
+//                          landing de pauta no usa SMS. Se puede cortar de acá.
+// Cache de 10 s por instancia (el endpoint público se pide en cada arranque de
+// la PWA): un cambio del panel tarda como mucho eso en verse en las demás.
+const ACCESS_SWITCHES_KEY = 'accessSwitches';
+const ACCESS_SWITCHES_TTL_MS = 10000;
+const SMS_OFF_MSG = 'La verificación por SMS no está disponible por el momento.';
+let _accessSwitchesCache = null; // { at, value }
+
+function _normAccessSwitches(raw) {
+  const r = (raw && typeof raw === 'object') ? raw : {};
+  const smsEnabled = r.smsEnabled === true;
+  const registrationEnabled = r.registrationEnabled === true;
+  return {
+    smsEnabled,
+    registrationEnabled,
+    landingSignupEnabled: r.landingSignupEnabled !== false,
+    registrationOpen: smsEnabled && registrationEnabled
+  };
+}
+
+async function getAccessSwitches(opts) {
+  const fresh = !!(opts && opts.fresh);
+  const now = Date.now();
+  if (!fresh && _accessSwitchesCache && (now - _accessSwitchesCache.at) < ACCESS_SWITCHES_TTL_MS) {
+    return _accessSwitchesCache.value;
+  }
+  // getConfig no tira: ante un error de DB devuelve null → todo apagado (el
+  // lado seguro: no se manda ningún SMS ni se abre el registro por un hipo).
+  const value = _normAccessSwitches(await getConfig(ACCESS_SWITCHES_KEY, null));
+  _accessSwitchesCache = { at: now, value };
+  return value;
+}
+
+// Los DOS únicos caminos a SNS pasan por acá: con el SMS apagado no se llama al
+// servicio (ni se crea el OtpCode). No importar otpService/smsService directo.
+async function generateAndSendOTP(...args) {
+  if (!(await getAccessSwitches()).smsEnabled) {
+    return { success: false, error: SMS_OFF_MSG, code: 'SMS_DISABLED' };
+  }
+  return _otpService.generateAndSendOTP(...args);
+}
+
+async function sendSMS(...args) {
+  if (!(await getAccessSwitches()).smsEnabled) {
+    return { success: false, error: SMS_OFF_MSG, code: 'SMS_DISABLED' };
+  }
+  return _smsService.sendSMS(...args);
+}
 // #310 (owner 2026-09-29: "¿por qué dos cuentas pueden tener el mismo número?").
 // Los chequeos de unicidad miraban SOLO `phoneKey` (clave normalizada): una cuenta
 // vieja con el teléfono guardado pero sin phoneKey (alta por panel, importadas,
@@ -3677,6 +3743,88 @@ const publisherAdminMiddleware = (req, res, next) => {
 };
 
 // ============================================
+// CANDADO DE SMS / REGISTRO (#322)
+// ============================================
+// Un solo middleware por PATH (en vez de tocar cada handler): con el SMS
+// apagado, todo endpoint que manda o valida un código responde SMS_DISABLED;
+// con el registro cerrado, el alta pública responde REGISTRATION_DISABLED.
+// Va ANTES de las rutas de auth. ⚠️ Endpoint nuevo que mande SMS ⇒ sumarlo acá.
+const SMS_GATED_PATHS = new Set([
+  '/api/auth/change-password/send-otp',
+  '/api/auth/login-otp-request',
+  '/api/auth/login-otp-verify',
+  '/api/auth/request-password-reset',
+  '/api/auth/verify-reset-otp',
+  '/api/auth/complete-password-reset',
+  '/api/auth/verify-phone/send-otp',
+  '/api/auth/verify-phone/confirm',
+  '/api/admin/bulk-sms'
+]);
+const REGISTRATION_GATED_PATHS = new Set([
+  '/api/auth/register',
+  '/api/auth/send-register-otp'
+]);
+app.use(async (req, res, next) => {
+  if (req.method !== 'POST') return next();
+  const isRegistration = REGISTRATION_GATED_PATHS.has(req.path);
+  const isSms = SMS_GATED_PATHS.has(req.path);
+  if (!isRegistration && !isSms) return next();
+  const sw = await getAccessSwitches();
+  if (isRegistration && !sw.registrationOpen) {
+    return res.status(403).json({
+      error: 'El registro de cuentas nuevas no está disponible por el momento.',
+      code: 'REGISTRATION_DISABLED'
+    });
+  }
+  if (isSms && !sw.smsEnabled) {
+    return res.status(503).json({
+      error: `${SMS_OFF_MSG} Escribinos a soporte y te ayudamos.`,
+      code: 'SMS_DISABLED'
+    });
+  }
+  next();
+});
+
+// Estado público de los interruptores: la PWA lo pide al arrancar (sin sesión)
+// para ocultar el registro y todo lo que dependa del SMS.
+app.get('/api/config/access', async (req, res) => {
+  const sw = await getAccessSwitches();
+  res.set('Cache-Control', 'no-store');
+  res.json({ smsEnabled: sw.smsEnabled, registrationEnabled: sw.registrationOpen });
+});
+
+// Panel → Configuración → "📵 SMS y registro" (solo admin general).
+app.get('/api/admin/access-switches', authMiddleware, adminMiddleware, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+  res.json(await getAccessSwitches({ fresh: true }));
+});
+
+app.post('/api/admin/access-switches', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const b = req.body || {};
+    const cur = await getAccessSwitches({ fresh: true });
+    const next = {
+      smsEnabled: typeof b.smsEnabled === 'boolean' ? b.smsEnabled : cur.smsEnabled,
+      registrationEnabled: typeof b.registrationEnabled === 'boolean' ? b.registrationEnabled : cur.registrationEnabled,
+      landingSignupEnabled: typeof b.landingSignupEnabled === 'boolean' ? b.landingSignupEnabled : cur.landingSignupEnabled
+    };
+    // El registro verifica el teléfono por SMS: no puede quedar abierto sin SMS.
+    if (b.registrationEnabled === true && !next.smsEnabled) {
+      return res.status(400).json({ error: 'Para abrir el registro primero encendé el SMS: el registro verifica el teléfono con un código.' });
+    }
+    if (!next.smsEnabled) next.registrationEnabled = false;
+    await Config.set(ACCESS_SWITCHES_KEY, next, req.user.username);
+    _accessSwitchesCache = null;
+    logger.info(`[access-switches] ${req.user.username}: sms ${next.smsEnabled ? 'ON' : 'OFF'} · registro ${next.registrationEnabled ? 'ON' : 'OFF'} · landing ${next.landingSignupEnabled ? 'ON' : 'OFF'}`);
+    res.json(Object.assign({ success: true }, await getAccessSwitches({ fresh: true })));
+  } catch (error) {
+    logger.error(`Error guardando access-switches: ${error.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// ============================================
 // RUTAS DE AUTENTICACIÓN
 // ============================================
 
@@ -4490,7 +4638,9 @@ async function _deriveUniqueUsername(name) {
 
 app.post('/api/landing/signup', landingIpLimiter, async (req, res) => {
   try {
-    if (String(process.env.LANDING_SIGNUP_DISABLED || '').toLowerCase() === 'true') {
+    // Kill-switch por env (histórico) o interruptor del panel (#322).
+    if (String(process.env.LANDING_SIGNUP_DISABLED || '').toLowerCase() === 'true'
+        || !(await getAccessSwitches()).landingSignupEnabled) {
       return res.status(410).json({ error: 'El registro rápido no está disponible en este momento.' });
     }
 
@@ -5441,7 +5591,11 @@ app.post('/api/auth/change-password', authMiddleware, authLimiter, async (req, r
     const requestedPhoneRaw = (typeof phone === 'string' && phone.trim())
       || (typeof whatsapp === 'string' && whatsapp.trim())
       || null;
-    const requestedPhone = requestedPhoneRaw ? requestedPhoneRaw.trim() : null;
+    // #322: con el SMS apagado no se puede verificar un teléfono → se ignora el
+    // que venga y el cambio sigue las reglas de "sin tocar teléfono" (clave
+    // actual, salvo en el cambio obligatorio de primer ingreso).
+    const _smsOn = (await getAccessSwitches()).smsEnabled;
+    const requestedPhone = (_smsOn && requestedPhoneRaw) ? requestedPhoneRaw.trim() : null;
 
     // ¿Se está intentando agregar/cambiar el teléfono?
     // - Si el usuario NO tiene teléfono verificado y se envió un teléfono → exigir OTP.
@@ -10055,7 +10209,8 @@ app.post('/api/admin/withdrawal', authMiddleware, withdrawerMiddleware, async (r
     // Si el usuario destino vino por flujo rápido y aún no verificó teléfono,
     // el admin tampoco puede procesar el retiro: el usuario tiene que verificar
     // primero (decisión de negocio: anti-fraude).
-    if (user.phoneVerificationPending === true) {
+    // #322: con el SMS apagado nadie puede verificar → el candado no aplica.
+    if (user.phoneVerificationPending === true && (await getAccessSwitches()).smsEnabled) {
       return res.status(403).json({
         error: `${user.username} debe verificar un teléfono antes de poder retirar.`,
         code: 'PHONE_VERIFICATION_REQUIRED'
@@ -11793,7 +11948,8 @@ app.post('/api/movements/withdraw', authMiddleware, async (req, res) => {
     // de teléfono antes de permitir el primer retiro. El frontend debe abrir el
     // modal de verify-phone cuando recibe este code.
     const userForCheck = await User.findOne({ id: req.user.userId }).lean();
-    if (userForCheck && userForCheck.phoneVerificationPending === true) {
+    if (userForCheck && userForCheck.phoneVerificationPending === true
+        && (await getAccessSwitches()).smsEnabled) { // #322: sin SMS no se puede verificar
       return res.status(403).json({
         error: 'Para retirar primero tenés que verificar un número de teléfono.',
         code: 'PHONE_VERIFICATION_REQUIRED'
@@ -12149,7 +12305,8 @@ app.post('/api/withdrawal/request', authMiddleware, async (req, res) => {
     // volver a exigirlo, setear WITHDRAW_REQUIRE_SMS=true en SSM. Con el flag
     // en true vuelve a pedir teléfono verificado como antes.
     if (String(process.env.WITHDRAW_REQUIRE_SMS || '').toLowerCase() === 'true'
-        && user.phoneVerified !== true) {
+        && user.phoneVerified !== true
+        && (await getAccessSwitches()).smsEnabled) { // #322: sin SMS no se exige
       return res.status(400).json({
         error: 'Para retirar tu premio necesitás verificar tu teléfono por SMS.',
         code: 'PHONE_VERIFICATION_REQUIRED'
@@ -12395,7 +12552,8 @@ app.post('/api/install-bonus/claim', authMiddleware, async (req, res) => {
     const _agentCreated = user.createdByAgent === true ||
       user.acquisitionSource === 'manual' ||
       !!user.accessLinkCreatedAt;
-    if (!_agentCreated && user.phoneVerified !== true) {
+    if (!_agentCreated && user.phoneVerified !== true
+        && (await getAccessSwitches()).smsEnabled) { // #322: sin SMS no se exige
       return res.status(400).json({
         error: 'Para reclamar el bono necesitás tener tu teléfono verificado por SMS. Verificalo y volvé a tocar "Reclamar".',
         code: 'PHONE_VERIFICATION_REQUIRED'

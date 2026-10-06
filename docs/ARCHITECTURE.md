@@ -5,7 +5,10 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-06** — REFERIDOS 2.0 (#317, réplica #168-#175 del gemelo):
+> Última actualización: **2026-10-06** — interruptores de SMS y registro (#322: §3, §5, §6,
+> §9; SMS y auto-registro APAGADOS por default, se prenden desde el panel). De paso se
+> corrigieron datos stale (§4.8 default de referidos, §5 ruteo por key del dueño, §6 admin-sw).
+> Antes ese mismo día: REFERIDOS 2.0 (#317, réplica #168-#175 del gemelo):
 > niveles de % por referidos activos, tablero en vivo, actividad/ranking del admin (§2, §4.6,
 > §5, §8, §9). Antes ese mismo día: status de reembolsos devuelve `alreadyPaid`
 > (plata cobrada en diarios/semanales, #316, §5).
@@ -291,6 +294,19 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   `/api/admin/me` siempre las reemite y el panel lo llama cada 30 min →
   `refreshAdminToken`), SameSite=Strict. `GET /api/admin/me` revalida la cookie contra
   DB y devuelve un token fresco para Socket.IO.
+- **Interruptores de SMS y registro (#322, 2026-10-06):** `Config['accessSwitches']`
+  `{smsEnabled, registrationEnabled, landingSignupEnabled}` — defaults **OFF / OFF / ON** (el
+  proyecto corre en cuentas de AWS sin SNS habilitado). `getAccessSwitches()` (server.js,
+  cache 10 s por instancia) → `registrationOpen = sms && registro` (el registro verifica el
+  teléfono por SMS, #141). Tres capas: (1) los wrappers `generateAndSendOTP`/`sendSMS` de
+  server.js cortan antes de SNS; (2) un middleware por PATH antes de las rutas de auth
+  (`SMS_GATED_PATHS` → 503 `SMS_DISABLED`; `REGISTRATION_GATED_PATHS` → 403
+  `REGISTRATION_DISABLED`); (3) los candados de "teléfono verificado" (retiros, bono de
+  instalación) y el teléfono del cambio de clave se saltean con el SMS apagado.
+  `GET /api/config/access` (público) le dice a la PWA qué ocultar; `GET/POST
+  /api/admin/access-switches` (solo admin general) lo cambia desde panel → Configuración →
+  "📵 SMS y registro". ⚠️ Endpoint nuevo que mande SMS ⇒ sumarlo a `SMS_GATED_PATHS` y
+  usar los wrappers (nunca `otpService`/`smsService` directo).
 - Rate limiting: `generalLimiter` 300/min (keyed por cookie de sesión admin o IP; en
   memoria), `authLimiter` 10/min y `sensitiveLimiter` 10/15min (Redis compartido con
   fallback a memoria — `RedisBackedRateStore`), `smsIpLimiter`/`bulkSmsIpLimiter`/
@@ -561,7 +577,7 @@ tenían los 4 clientes viejos.
 | `GIROX_PLAY_URL` | `https://1girox.com` | Sitio del jugador (fallback si el SSO falla) |
 | `GIROX_NETWIN_SCOPE` | `casino` | `casino` \| `total` (incluiría sports) en reembolsos/comisiones |
 | `GIROX_MAX_RPM` | `55` | Techo local de requests/min **por instancia** |
-| `GIROX_REFERRAL_COMMISSION_PCT` | `8` | % de netwin que es owner-revenue (el proveedor ya no la informa) |
+| `GIROX_REFERRAL_COMMISSION_PCT` | `3` | % plano de comisión de referidos, respaldo del comando `/sys_referidos_pct` (#307; ver §4.6) |
 | `VIP_USD_ARS_RATE` | `1500` | Tasa USD→ARS de los umbrales VIP (los umbrales de Stake están en USD) |
 | `VIP_WAGER_SCOPE` | `casino` | Qué apostado suma para el nivel (`casino` \| `total`) |
 | `VIP_WAGER_EPOCH` | `2026-07` | Primer mes que se acumula (cuando arrancó 1girox) |
@@ -595,7 +611,11 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 
 ## 5. Flujos principales
 
-- **Registro**: `POST /api/auth/register` (user+pass; OTP solo si manda teléfono) o
+- **Registro**: ⚠️ **CERRADO por default (#322)** — solo responde con SMS + registro
+  encendidos en el panel (`registrationOpen`, §3); la PWA oculta "Crear cuenta". Las altas
+  siguen por agente / publisher_admin / landing de pauta (`/api/landing/signup`, su propio
+  interruptor `landingSignupEnabled`, default ON). Con el registro abierto:
+  `POST /api/auth/register` (user+pass + teléfono con OTP obligatorio, #141) o
   `register-quick` (link de pauta con campaignCode válido, sin SMS,
   phoneVerificationPending=true → no puede retirar hasta verificar). Crea en 1girox
   PRIMERO (`girox.syncUserToPlatform`); guarda atribución, fbc/fbp, registrationIp.
@@ -613,8 +633,10 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   del publicista correcto en la jerarquía. Sin key configurada (o si falla) → fallback a
   `girox.syncUserToPlatform` con la key master. ⚠️ Si el username YA existía en 1girox,
   queda bajo el agente que lo creó primero: recrearlo con otra key NO lo mueve de rama.
-  Cargas, retiros y bonos van SIEMPRE por la key master (los depósitos salen del saldo
-  del dueño de la key — que es lo que queremos).
+  Desde #132 las operaciones de ESE jugador (cargas, retiros, bonos, saldo, stats, SSO)
+  se firman con la key de su campaña dueña (`User.giroxOwnerCampaign`, ver §2 Campaign
+  "RUTEO POR DUEÑO"): la master no lo ve por Partner API, y las cargas salen del saldo
+  del sub-agente.
   **Multi-publicista (2026-08-07):** una cuenta publisher_admin puede tener VARIAS
   campañas (`User.publisherCampaignCodes`, lista; `publisherCampaignCode` queda como
   "principal"/compat = la primera). Los permitidos se resuelven SIEMPRE con
@@ -951,6 +973,12 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   del widget "Cargas Automáticas" (`#casinoCommunityRow`, ui.js
   `_applyCasinoCommunity`): SIEMPRE visible, href estático `/go/comunidad` que chat.js
   pisa con el link directo cuando la config llega (`VIP.state.communityChannelUrl`).
+- **Flags de acceso (#322):** `VIP.flags {sms, signup}` (config.js) = interruptores del
+  panel, default apagado. Un inline del `<head>` aplica lo cacheado (`localStorage
+  vip_access_flags`) como clases `html.sms-off` / `html.signup-off` antes del primer frame;
+  `VIP.loadAccessFlags()` lo refresca contra `GET /api/config/access`. Con `signup` apagado
+  no hay "Registrarse" / tab "Crear cuenta" ni popup de referidos; con `sms` apagado no hay
+  recuperar clave, verificar teléfono ni teléfono en el cambio de clave.
 - **Botón CASINO** (`#plataformaBtn` → `VIP.ui.enterCasino()`): login único contra
   1girox. Ver la trampa del pop-up blocker en §4.9. El modal de acceso manual sigue
   existiendo, pero **sólo como camino de respaldo** cuando el SSO falla.
@@ -982,7 +1010,10 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   prueba `giroxApiKey` (el panel valida que empiece con `pk_`). La respuesta del listado
   expone `hasJugayganaCreds` mapeado desde `hasGiroxKey`. El "probar login" ya no
   loguea: consulta un jugador inexistente — 404 = key válida, 401 = key rechazada.
-- `admin-sw.js` (v24, scope /adminprivado2026/): network-first no-store para el shell.
+- `public/admin-sw.js` (scope /adminprivado2026/, servido por un handler propio; versión
+  actual en su `CACHE_VERSION`): network-first no-store para el shell.
+- **Card "📵 SMS y registro"** (Configuración, solo admin general, #322): interruptores de
+  §3. Con el SMS apagado el ítem "SMS Masivo" del menú se oculta.
 - Servido por handlers propios con cache en memoria (`readFileCached`) + ADMIN_HOST
   check opcional; el catch-all bloquea todo otro path bajo /adminprivado2026/.
 - Secciones "Automatización" y "Estrategia de bonos" están marcadas "No se usa" en el
@@ -1049,6 +1080,13 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
 
 ## 9. Trampas / "no rompas esto"
 
+- **SMS y registro APAGADOS por default (#322)**: interruptores `Config['accessSwitches']`
+  (§3). No "arreglar" un 403 `REGISTRATION_DISABLED` / 503 `SMS_DISABLED` en el código: se
+  prende desde el panel. En el front, todo lo que dependa de SMS o registro pregunta
+  `VIP.flags.sms` / `VIP.flags.signup` (`=== true`) y se oculta por las clases
+  `html.sms-off` / `html.signup-off` (CSS en el `<head>` de index.html); `VIP.ui.showModal`
+  bloquea los modales de registro/SMS. El default apagado aplica a CUALQUIER entorno cuya
+  base no tenga el Config guardado.
 - **DOS `connectDB`**: el real es `config/database.js`; el de `src/models/index.js` NO
   se usa. No definir schemas en config/database.js.
 - **Referidos (#317)**: DOS funciones con nombre parecido — `referralTierService.
