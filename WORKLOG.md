@@ -13,7 +13,8 @@
   `1giroxauto.com` ("Código de pauta inválido o inactivo" para una campaña creada en el
   clon). Preguntó si se puede sumar otro backend al MISMO proyecto de Vercel.
 - `landing/index.html`: tabla `SITES` (clave → `{api, bonusBig, bonusSub}`: `original` =
-  1giroxauto.com / 100%, `rapidogirox` = rapidogirox.com / 50%), `HOST_TO_SITE` (dominio de la
+  1giroxauto.com / 100%, `rapidogirox` = rapidogirox.com / 100% — owner: la landing muestra 100%
+  aunque el bono del panel del clon esté en 50% con tope), `HOST_TO_SITE` (dominio de la
   landing → sitio, para tener varios dominios en el mismo proyecto: Vercel → Settings →
   Domains) y `DEFAULT_SITE`. Orden: dominio > `?s=CLAVE` > default. Solo se puede elegir
   entre los sitios de la lista (no se puede mandar a un backend ajeno desde el link).
