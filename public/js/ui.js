@@ -3245,8 +3245,9 @@ VIP.ui._refreshRewards = function() {
 function _wrBonusRuleTxt(pct) {
   var br = (VIP.ui._rwSummary && VIP.ui._rwSummary.bonusRules) || null;
   var p = Number(pct) || 0, parts = [];
-  if (p >= 100 && br && br.capEnabled && br.capArs > 0) {
-    var ej = 20000, b1 = Math.min(ej, br.capArs) * p / 100, b2 = Math.max(0, ej - br.capArs) * (br.restPct || 0) / 100;
+  // #324: el tope vale para cualquier % mayor al del excedente (misma fórmula que el server).
+  if (br && br.capEnabled && br.capArs > 0 && p > (br.restPct || 0)) {
+    var ej = Math.max(20000, br.capArs * 4), b1 = Math.min(ej, br.capArs) * p / 100, b2 = Math.max(0, ej - br.capArs) * (br.restPct || 0) / 100;
     parts.push('El <b>' + p + '%</b> aplica hasta <b>' + _rwFmt(br.capArs) + '</b> de tu carga; sobre lo que cargues de más te sumamos el <b>' + (br.restPct || 0) + '%</b>. ' +
       'Ej.: cargás ' + _rwFmt(ej) + ' → <b>' + _rwFmt(Math.round(b1 + b2)) + ' de bono</b>.');
   } else if (p > 0) {
@@ -3267,9 +3268,12 @@ function _rwBonusRulesHtml(br, li, bodyOnly) {
     out += li('💳', 'En tu <b style="color:#fff;">PRIMERA carga</b> te sumamos un <b style="color:#26e07f;">' + br.firstChargePct + '% EXTRA</b>, automático.');
   }
   if (br.capEnabled && br.capArs > 0) {
-    var ej = 20000, b1 = Math.min(ej, br.capArs), b2 = Math.max(0, ej - br.capArs) * (br.restPct || 0) / 100;
-    out += li('📏', 'Los bonos del <b style="color:#fff;">100%</b> aplican hasta <b style="color:#fff;">' + _rwFmt(br.capArs) + '</b> de la carga; sobre lo que cargues de más va un <b style="color:#fff;">' + (br.restPct || 0) + '%</b>. ' +
-      'Ej.: cargás ' + _rwFmt(ej) + ' → ' + _rwFmt(b1) + ' + ' + _rwFmt(Math.round(b2)) + ' = <b style="color:#26e07f;">' + _rwFmt(Math.round(b1 + b2)) + ' de bono</b>.');
+    // #324: el tope vale para cualquier %; el ejemplo usa el % del bono de primera carga.
+    var pEj = (br.firstChargeEnabled && br.firstChargePct > 0) ? br.firstChargePct : 100;
+    var rEj = Math.min(pEj, br.restPct || 0);
+    var ej = Math.max(20000, br.capArs * 4), b1 = Math.min(ej, br.capArs) * pEj / 100, b2 = Math.max(0, ej - br.capArs) * rEj / 100;
+    out += li('📏', 'El % del bono aplica <b style="color:#fff;">completo hasta ' + _rwFmt(br.capArs) + '</b> de la carga; sobre lo que cargues de más va un <b style="color:#fff;">' + (br.restPct || 0) + '%</b>. ' +
+      'Ej. con el ' + pEj + '%: cargás ' + _rwFmt(ej) + ' → ' + _rwFmt(Math.round(b1)) + ' + ' + _rwFmt(Math.round(b2)) + ' = <b style="color:#26e07f;">' + _rwFmt(Math.round(b1 + b2)) + ' de bono</b>.');
   }
   if (br.rolloverX != null) {
     out += li('🎯', 'Todos los bonos (primera carga, ruletas, reembolso, regalos) tienen <b style="color:#ffd700;">ROLLOVER x' + br.rolloverX + '</b>' + (br.rolloverX > 0 ? ': se juegan al instante y se retiran después de apostar ' + br.rolloverX + ' veces su valor.' : ' (sin rollover).'));

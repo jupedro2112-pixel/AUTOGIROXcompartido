@@ -5,7 +5,8 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-06** — trampas del entorno EB clonado (#323, §9).
+> Última actualización: **2026-10-06** — tope del bono de bienvenida para cualquier % (#324, §5).
+> Antes ese mismo día: trampas del entorno EB clonado (#323, §9).
 > Antes ese mismo día: interruptores de SMS y registro (#322: §3, §5, §6,
 > §9; SMS y auto-registro APAGADOS por default, se prenden desde el panel). De paso se
 > corrigieron datos stale (§4.8 default de referidos, §5 ruteo por key del dueño, §6 admin-sw).
@@ -894,7 +895,12 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   el rollover (#122).
 - **Bono instalación**: NEUTRALIZADO (#234) — el banner quedaba bajo el casino y
   pisaba el 100% de 1ª carga. `installbonus.js` oculta el banner y `claim()` es no-op.
-  El único bono de bienvenida es el de 1ª carga (automático, con tope #285).
+  El único bono de bienvenida es el de 1ª carga (automático): `Config['firstChargeBonus']`
+  `{enabled, percent, capEnabled, capArs, restPct}` (defaults off / 50% / $5.000 / 25%,
+  card "Bono de bienvenida" del panel). **Tope (#285, generalizado en #324):** el % completo
+  vale hasta `capArs` de la carga y el excedente va al `min(pct, restPct)` —
+  `_bonusWithCap` = `_loteBonusAmount`, la MISMA fórmula para 1ª carga, % de ruleta y lotes,
+  con cualquier % (antes solo se topeaba el 100% exacto).
 - **Link de acceso de un solo uso** (2026-08-03): el admin general o un DEPOSITOR
   generan `?acceso=<token>` para un cliente (`POST /api/admin/users/:userId/access-link`,
   también desde el alta del panel; regenerar pisa el anterior). En `User` vive SOLO

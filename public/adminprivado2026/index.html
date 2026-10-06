@@ -657,14 +657,15 @@ document.addEventListener('change', function (ev) {
                                 <span class="icon icon-save"></span> Guardar Comunidad
                             </button>
                         </div>
-                        <!-- Bono de PRIMERA CARGA (100% a todos, 1 vez) -->
+                        <!-- Bono de PRIMERA CARGA / bienvenida (a todos, 1 vez) — % + tope + % del resto (#324) -->
                         <div class="panel-subheader" style="margin-top: 24px;" id="firstChargeHeader">
-                            <h3>🎁 Bono de primera carga (100% a todos)</h3>
+                            <h3>🎁 Bono de bienvenida (primera carga)</h3>
                         </div>
                         <div class="cbu-form" id="firstChargeForm">
                             <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
                                 Le da a <b>TODOS</b> los clientes un bono en su <b>PRIMERA carga</b> (y solo la
-                                primera), automático. Ej: 100% = si carga $5.000, se le suman $5.000 de bono.
+                                primera), automático. Elegís el <b>%</b>, hasta qué monto de la carga vale ese %
+                                completo (<b>tope</b>) y qué <b>% menor</b> se da sobre lo que cargue de más.
                                 Se aplica una sola vez por cliente, con reserva atómica (no se duplica). No afecta
                                 a los que ya cargaron antes.
                             </p>
@@ -675,23 +676,23 @@ document.addEventListener('change', function (ev) {
                             </div>
                             <div class="form-group">
                                 <label>% de bono en la primera carga:</label>
-                                <input type="number" id="fcbPercent" min="1" max="500" step="5" placeholder="100" style="width:100%;">
-                                <small style="color:#aaa;font-size:11px;">100 = duplica la primera carga. Máx 500.</small>
+                                <input type="number" id="fcbPercent" min="1" max="500" step="5" placeholder="50" style="width:100%;">
+                                <small style="color:#aaa;font-size:11px;">50 = le suma la mitad de lo que carga. 100 = duplica la carga. Máx 500.</small>
                             </div>
-                            <!-- #285 TOPE del bono del 100% (aplica a TODO bono automático de 100%: 1ª carga, ruleta, lote) -->
+                            <!-- TOPE (#285/#324): aplica a TODO bono automático en % (1ª carga, ruleta, lote), sea cual sea el % -->
                             <div class="form-group">
                                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                    <input type="checkbox" id="fcbCapEnabled" style="width:auto;"> Limitar los bonos del 100%
+                                    <input type="checkbox" id="fcbCapEnabled" style="width:auto;"> Poner TOPE al bono (el % completo vale hasta un monto de la carga)
                                 </label>
                             </div>
                             <div style="display:flex;gap:10px;flex-wrap:wrap;">
                                 <div class="form-group" style="flex:1;min-width:140px;">
-                                    <label>100% hasta ($ de la carga)</label>
+                                    <label>% completo hasta ($ de la carga)</label>
                                     <input type="number" id="fcbCapArs" min="0" step="500" placeholder="5000">
                                 </div>
                                 <div class="form-group" style="flex:1;min-width:140px;">
                                     <label>% sobre lo que cargue de más</label>
-                                    <input type="number" id="fcbRestPct" min="0" max="100" step="5" placeholder="20">
+                                    <input type="number" id="fcbRestPct" min="0" max="100" step="5" placeholder="25">
                                 </div>
                             </div>
                             <small id="fcbCapHint" style="color:#aaa;font-size:11px;display:block;margin:-4px 0 10px;"></small>

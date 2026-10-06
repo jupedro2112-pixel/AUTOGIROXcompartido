@@ -6651,14 +6651,14 @@ async function loadFirstChargeBonus() {
         const en = document.getElementById('fcbEnabled');
         const pc = document.getElementById('fcbPercent');
         if (en) en.checked = cfg.enabled === true;
-        if (pc) pc.value = cfg.percent || 100;
-        // #285 tope del 100%
+        if (pc) pc.value = cfg.percent || 50;
+        // Tope del bono (#285/#324)
         const ce = document.getElementById('fcbCapEnabled'), ca = document.getElementById('fcbCapArs'), rp = document.getElementById('fcbRestPct');
         if (ce) ce.checked = cfg.capEnabled !== false;
         if (ca) ca.value = cfg.capArs != null ? cfg.capArs : 5000;
-        if (rp) rp.value = cfg.restPct != null ? cfg.restPct : 20;
+        if (rp) rp.value = cfg.restPct != null ? cfg.restPct : 25;
         _fcbCapHint();
-        ['fcbCapEnabled', 'fcbCapArs', 'fcbRestPct'].forEach(function(id) { const el = document.getElementById(id); if (el && !el._hintBound) { el._hintBound = true; el.addEventListener('input', _fcbCapHint); el.addEventListener('change', _fcbCapHint); } });
+        ['fcbPercent', 'fcbCapEnabled', 'fcbCapArs', 'fcbRestPct'].forEach(function(id) { const el = document.getElementById(id); if (el && !el._hintBound) { el._hintBound = true; el.addEventListener('input', _fcbCapHint); el.addEventListener('change', _fcbCapHint); } });
     } catch (e) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
 }
 function _fcbCapHint() {
@@ -6666,9 +6666,17 @@ function _fcbCapHint() {
     const on = document.getElementById('fcbCapEnabled').checked;
     const cap = Number(document.getElementById('fcbCapArs').value) || 0;
     const rest = Number(document.getElementById('fcbRestPct').value) || 0;
-    if (!on || cap <= 0) { h.textContent = 'Sin tope: un bono del 100% duplica toda la carga.'; return; }
-    const ej = 20000, b1 = Math.min(ej, cap), b2 = Math.round(Math.max(0, ej - cap) * rest / 100);
-    h.textContent = 'Aplica a TODO bono automático del 100% (1ª carga, ruleta, lote). Ej.: carga $' + ej.toLocaleString('es-AR') + ' → $' + b1.toLocaleString('es-AR') + ' (100% hasta $' + cap.toLocaleString('es-AR') + ') + $' + b2.toLocaleString('es-AR') + ' (' + rest + '% del resto) = $' + (b1 + b2).toLocaleString('es-AR') + ' de bono.';
+    // #324: el tope vale para cualquier % (misma fórmula que el server: _loteBonusAmount).
+    const pct = Number(document.getElementById('fcbPercent').value) || 0;
+    const f = function(n) { return '$' + Math.round(n).toLocaleString('es-AR'); };
+    const ej = Math.max(20000, cap * 4);
+    if (!on || cap <= 0) { h.textContent = 'Sin tope: el ' + pct + '% se aplica sobre TODA la carga. Ej.: carga ' + f(ej) + ' → ' + f(ej * pct / 100) + ' de bono.'; return; }
+    const restEf = Math.min(pct, rest);
+    const b1 = Math.min(ej, cap) * pct / 100, b2 = Math.max(0, ej - cap) * restEf / 100;
+    let t = 'Ej.: carga ' + f(ej) + ' → ' + f(b1) + ' (' + pct + '% de los primeros ' + f(cap) + ') + ' + f(b2) + ' (' + restEf + '% de los ' + f(ej - cap) + ' restantes) = ' + f(b1 + b2) + ' de bono. ' +
+        'Si carga ' + f(cap) + ' o menos, recibe el ' + pct + '% completo. El mismo tope vale para los % de la ruleta y de los lotes.';
+    if (rest >= pct) t = '⚠️ El % sobre el excedente (' + rest + '%) no es menor que el del bono (' + pct + '%): el tope no cambia nada. ' + t;
+    h.textContent = t;
 }
 async function saveFirstChargeBonus() {
     const enabled = document.getElementById('fcbEnabled').checked;

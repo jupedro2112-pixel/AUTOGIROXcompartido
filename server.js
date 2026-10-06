@@ -629,15 +629,20 @@ async function _isFirstDeposit(userId) {
 }
 
 // ============================================================
-// BONO DE PRIMERA CARGA (100% a TODOS, una sola vez — owner 2026-08-22)
-// Config['firstChargeBonus'] = { enabled, percent } (default off, 100%).
+// BONO DE PRIMERA CARGA (a TODOS, una sola vez — owner 2026-08-22)
+// Config['firstChargeBonus'] = { enabled, percent, capEnabled, capArs, restPct }
+// (default off; 50% hasta $5.000 de la carga, 25% sobre el resto).
 // ============================================================
-// #285 (owner 2026-09-18): TOPE del bono del 100% — el 100% aplica solo hasta
-// `capArs` de la carga; sobre el resto va `restPct`. Ej: carga $20.000 →
-// $5.000 (100% de los primeros 5.000) + $3.000 (20% de 15.000) = $8.000.
-// Vale para TODO bono automático de 100% (1ª carga, ruleta 100%, lote 100%).
-const BONUS100_CAP_DEFAULT = { capEnabled: true, capArs: 5000, restPct: 20 };
-let _fcbCfgCache = { enabled: false, percent: 100, ...BONUS100_CAP_DEFAULT }; // #311: última config leída (para textos sync)
+// TOPE del bono (#285, generalizado en #324 — owner 2026-10-06: "que el bono de
+// bienvenida sea de 50% hasta un tope y después de ese tope un 25%, modificable"):
+// el % COMPLETO aplica solo hasta `capArs` de la carga; sobre el excedente va
+// `restPct` (nunca más que el % del bono). Ej. 50% / $5.000 / 25%: carga $20.000 →
+// $2.500 (50% de los primeros 5.000) + $3.750 (25% de 15.000) = $6.250.
+// Vale para TODO bono automático en % (1ª carga, % de ruleta, % de lote), sea
+// cual sea el % — antes de #324 solo se topeaba el 100% exacto.
+const BONUS_PCT_DEFAULT = 50;
+const BONUS100_CAP_DEFAULT = { capEnabled: true, capArs: 5000, restPct: 25 };
+let _fcbCfgCache = { enabled: false, percent: BONUS_PCT_DEFAULT, ...BONUS100_CAP_DEFAULT }; // #311: última config leída (para textos sync)
 async function getFirstChargeBonusConfig() {
   try {
     const raw = await getConfig('firstChargeBonus', null);
@@ -651,13 +656,14 @@ async function getFirstChargeBonusConfig() {
       });
     }
   } catch (_) {}
-  return { enabled: false, percent: 100, ...BONUS100_CAP_DEFAULT };
+  return { enabled: false, percent: BONUS_PCT_DEFAULT, ...BONUS100_CAP_DEFAULT };
 }
 // #311 (réplica de #172 del gemelo, owner 2026-09-29): el % de un LOTE respeta el MISMO
-// tope del bono de 1ª carga: el % del lote aplica hasta `capArs` ($5.000) y el excedente
-// de la carga se bonifica al `restPct` (20%), nunca más que el % del lote. Ej.: lote 100%,
-// carga $10.000 → $5.000 al 100% + $5.000 al 20% = $6.000; lote 50% → $2.500 + $1.000 =
-// $3.500; lote 20% → 20% de todo. (A diferencia de _bonusWithCap, que solo topea el 100%.)
+// tope del bono de 1ª carga: el % del lote aplica hasta `capArs` y el excedente de la
+// carga se bonifica al `restPct`, nunca más que el % del lote. Ej. con tope $5.000 y
+// resto 20%: lote 100%, carga $10.000 → $5.000 al 100% + $5.000 al 20% = $6.000; lote
+// 50% → $2.500 + $1.000 = $3.500; lote 20% → 20% de todo. Desde #324 es LA fórmula de
+// todos los bonos automáticos en % (_bonusWithCap delega acá).
 // capEnabled false o capArs 0 = sin tope.
 function _loteBonusAmount(amount, pct, cfg) {
   const a = Math.max(0, Number(amount) || 0), p = Math.max(0, Number(pct) || 0);
@@ -673,13 +679,10 @@ function _loteCapTxt(pct, cfg) {
   if (!(cap > 0) || p <= ex) return '';
   return ` (${p}% hasta $${cap.toLocaleString('es-AR')}, el resto al ${ex}%)`;
 }
-// Monto de un bono AUTOMÁTICO en % sobre una carga, con el tope del 100% (#285).
+// Monto de un bono AUTOMÁTICO en % sobre una carga, con el tope (#285/#324): misma
+// fórmula que los lotes, para cualquier % (con 100% da lo mismo que antes de #324).
 function _bonusWithCap(amount, pct, cfg) {
-  const a = Math.max(0, Number(amount) || 0), p = Math.max(0, Number(pct) || 0);
-  if (cfg && cfg.capEnabled !== false && p >= 100 && cfg.capArs > 0 && a > cfg.capArs) {
-    return Math.round(cfg.capArs * p / 100 + (a - cfg.capArs) * (Number(cfg.restPct) || 0) / 100);
-  }
-  return Math.round(a * p / 100);
+  return _loteBonusAmount(amount, pct, cfg || BONUS100_CAP_DEFAULT);
 }
 async function computeAutoBonus(amount, pct) {
   let cfg = null;

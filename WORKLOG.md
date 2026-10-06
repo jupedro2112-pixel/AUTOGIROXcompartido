@@ -8,6 +8,38 @@
 
 ## Sesión 2026-10-06
 
+### 324. Bono de bienvenida (1ª carga): % + TOPE + % del excedente, los tres editables — el tope vale para cualquier %
+- Owner (captura de la card del panel): "quiero que el bono de bienvenida sea de 50% y llegue
+  a un tope y después de ese tope sea un 25%; que también sea modificable".
+- **Qué impedía hacerlo:** la card ya tenía % / tope / % del resto (#285), pero
+  `_bonusWithCap` solo topeaba el **100% exacto** (`p >= 100`): con 50% el tope se ignoraba y
+  el cliente cobraba el 50% de toda la carga.
+- **Cambio:** `_bonusWithCap` delega en `_loteBonusAmount` (la fórmula que los lotes usan
+  desde #311): `min(carga, tope) × pct% + max(0, carga − tope) × min(pct, restPct)%`. Vale
+  para TODO bono automático en % — 1ª carga, % de ruleta (bienvenida y diaria, vía
+  `computeAutoBonus`) y lotes. Con 100% el resultado es idéntico al de antes.
+  ⚠️ Cambio de comportamiento: un premio de ruleta en % MENOR a 100 (y mayor al % del resto)
+  ahora también respeta el tope; antes se pagaba sobre toda la carga.
+- **Defaults sin config guardada:** 50% / tope $5.000 / 25% del resto (antes 100 / 5.000 /
+  20). Un entorno con `Config['firstChargeBonus']` ya guardado no cambia. El bono sigue
+  naciendo APAGADO: hay que tildar "Activar" y Guardar.
+- **Panel (admin-sw v71):** card "🎁 Bono de bienvenida (primera carga)": % del bono, check
+  "Poner TOPE", "% completo hasta ($ de la carga)" y "% sobre lo que cargue de más". El
+  ejemplo de abajo se recalcula en vivo con los tres valores (y avisa si el % del resto no es
+  menor que el del bono, porque ahí el tope no hace nada).
+- **PWA (SW v196, `ui.js?v=324`):** `_wrBonusRuleTxt` y el bloque BONOS de INFORMACIÓN
+  explican el tope con el % real (ya no dicen "los bonos del 100%"); el ejemplo usa el % del
+  bono de 1ª carga.
+- **Probado:** `node --check` (server.js, ui.js, admin.js, ambos SW) y la fórmula aislada:
+  50%/5.000/25% con carga $20.000 → $6.250; $5.000 → $2.500; $3.000 → $1.500; sin tope →
+  $10.000; 100% con la config vieja → $8.000 (igual que antes). **Back necesita deploy.**
+  PROBAR: panel → card → 50 / tope / 25 → Activar → Guardar; primera carga de un cliente
+  nuevo por encima del tope → bono = ejemplo de la card; segunda carga → sin bono.
+- **Reembolso diario (consulta del owner en la misma sesión):** ya se prende/apaga desde el
+  panel — check "☀️ Reembolso DIARIO activo" arriba de la card "Rangos de reembolso" +
+  "Guardar rangos" (#297). Apagado: la PWA oculta el botón/fila del diario y el claim se
+  rechaza. Verificado en código, sin cambios. Semanal y mensual NO tienen interruptor.
+
 ### 323. CASO ASENTADO: entorno EB clonado `AUTOGIROXcompartidoo` (502 al arrancar + login bloqueado por CORS)
 - Owner clonó el entorno `PAUTANUEVAsantino-env` (cuenta zamuxavier, sa-east-1) como
   `AUTOGIROXcompartidoo` (misma aplicación EB, mismo `SSM_PATH=/pautanuevasantino/prod/`,
