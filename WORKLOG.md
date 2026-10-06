@@ -8,6 +8,12 @@
 
 ## Sesión 2026-10-06
 
+### 318. Botón "🤝 Mis referidos" en el pie del widget (al lado de "Mis datos")
+- Owner: al tocar Depositar desaparece el banner de referidos del inicio y ya no se encuentra
+  la sección. Pie del widget: 🤖 Asistente · 🪪 Mis datos · **🤝 Mis referidos** →
+  `VIP.ui.openReferralModal()` (modal de #317, por encima del casino). SW → v193,
+  `ui.js?v=318`. Solo front.
+
 ### 317. REFERIDOS 2.0 — réplica del sistema #168-#175 del gemelo (JUGAYGANA) adaptada a 1girox
 - Paquete `~/Documents/AUTOREEMBOLSOSjygactivo/docs/replicas/referidos-jugaygana/` (Destino B).
   Misma idea, pantallas, reglas y endpoints; el netwin se reescribió con 1girox.
