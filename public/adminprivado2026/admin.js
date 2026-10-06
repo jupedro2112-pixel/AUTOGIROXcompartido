@@ -459,6 +459,25 @@ async function handleLogin(e) {
     }
 }
 
+// #328: prefijo de los usuarios nuevos (COMANDOS → /sys_usuario_prefijo). Se lee del
+// endpoint público al cargar el panel; hasta que llega se usa el default "g1".
+let USERNAME_PREFIX = 'g1';
+async function loadUsernamePrefix() {
+    try {
+        const r = await fetch(`${API_URL}/api/config/access`, { cache: 'no-store' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (typeof j.usernamePrefix === 'string') USERNAME_PREFIX = j.usernamePrefix;
+        document.querySelectorAll('.usernamePrefixTxt').forEach(function (el) { el.textContent = USERNAME_PREFIX; });
+        ['paNewUsername', 'newUserUsername'].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (el && (!el.value.trim() || el.value.trim() === 'g1' || el.value.trim() === 'gx')) el.value = USERNAME_PREFIX;
+            if (el) el.placeholder = USERNAME_PREFIX + 'nombre';
+        });
+    } catch (_) {}
+}
+loadUsernamePrefix();
+
 async function checkAdminSession() {
     try {
         const response = await fetch(`${API_URL}/api/admin/me`, {
@@ -606,7 +625,7 @@ function setupRoleBasedUI() {
         // Defaults del alta rápida (pedido owner 2026-08-07): usuario "gx" y
         // clave "asd123" precargados — solo si están vacíos, no pisa lo tipeado.
         const paU = document.getElementById('paNewUsername');
-        if (paU && !paU.value.trim()) paU.value = 'gx';
+        if (paU && !paU.value.trim()) paU.value = USERNAME_PREFIX;
         const paP = document.getElementById('paNewPassword');
         if (paP && !paP.value.trim()) paP.value = 'asd123';
         // Cargar stats iniciales + lista de usuarios paginada + influencers.
@@ -1044,9 +1063,9 @@ async function paCreateUser() {
     }
     // "gx" solo = quedó el default sin completar (el backend igual lo
     // rechazaría por mínimo 3 caracteres, pero avisamos claro acá).
-    if (username.toLowerCase() === 'gx') {
+    if (USERNAME_PREFIX && username.toLowerCase() === USERNAME_PREFIX) {
         if (errBox) {
-            errBox.textContent = 'Completá el nombre de usuario después de "gx" (ej: gxhector2)';
+            errBox.textContent = 'Completá el nombre de usuario después de "' + USERNAME_PREFIX + '" (ej: ' + USERNAME_PREFIX + 'hector2)';
             errBox.style.display = 'block';
         }
         return;
@@ -1105,7 +1124,7 @@ async function paCreateUser() {
         }
         // Reset del alta rápida (pedido owner 2026-08-07): el usuario VUELVE al
         // default "gx" (listo para completar gxhector2) y la clave a "asd123".
-        usernameEl.value = 'gx';
+        usernameEl.value = USERNAME_PREFIX;
         passwordEl.value = 'asd123';
         phoneEl.value = '';
         if (influencerEl) influencerEl.value = '';
@@ -5736,7 +5755,7 @@ function showCreateUserModal() {
     // el agente lo completa (ej. gxhector2). Solo si está vacío — no pisa lo
     // que haya quedado a medio tipear.
     const u = document.getElementById('newUserUsername');
-    if (u && !u.value.trim()) u.value = 'gx';
+    if (u && !u.value.trim()) u.value = USERNAME_PREFIX;
     showModal('createUserModal');
 }
 
@@ -5774,7 +5793,7 @@ async function handleCreateUser() {
             hideModal('createUserModal');
             loadUsers();
             // Limpiar formulario (el usuario vuelve al default "gx" para el próximo alta)
-            document.getElementById('newUserUsername').value = 'gx';
+            document.getElementById('newUserUsername').value = USERNAME_PREFIX;
             document.getElementById('newUserPassword').value = '';
             document.getElementById('newUserEmail').value = '';
             document.getElementById('newUserPhone').value = '';

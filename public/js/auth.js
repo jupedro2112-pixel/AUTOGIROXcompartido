@@ -1709,7 +1709,7 @@ VIP.auth = (function () {
         // El usuario de registro arranca con "gx" (antes "girox", antes "VIP");
         // el cliente completa — y lo puede BORRAR si quiere otro nombre.
         const ru = document.getElementById('registerUsername');
-        if (ru && !ru.value.trim()) ru.value = 'gx';
+        if (ru && !ru.value.trim()) ru.value = (VIP.flags && typeof VIP.flags.usernamePrefix === 'string') ? VIP.flags.usernamePrefix : 'g1'; // #328
     }
 
     // ============================================

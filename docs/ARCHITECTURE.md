@@ -617,7 +617,9 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 - **Registro**: ⚠️ **CERRADO por default (#322)** — solo responde con SMS + registro
   encendidos en el panel (`registrationOpen`, §3); la PWA oculta "Crear cuenta". Las altas
   siguen por agente / publisher_admin / landing de pauta (`/api/landing/signup`, su propio
-  interruptor `landingSignupEnabled`, default ON). Con el registro abierto:
+  interruptor `landingSignupEnabled`, default ON; username = prefijo del comando
+  `/sys_usuario_prefijo` (default `g1`) + nombre + 3 dígitos, #328; el mismo prefijo viene
+  precargado en las altas del panel). Con el registro abierto:
   `POST /api/auth/register` (user+pass + teléfono con OTP obligatorio, #141) o
   `register-quick` (link de pauta con campaignCode válido, sin SMS,
   phoneVerificationPending=true → no puede retirar hasta verificar). Crea en 1girox

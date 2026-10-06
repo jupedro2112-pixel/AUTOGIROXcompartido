@@ -50,7 +50,8 @@ VIP.state = {
 VIP.flags = Object.assign({ sms: false, signup: false }, window.__vipAccessFlags || {});
 
 VIP.applyAccessFlags = function (flags) {
-    VIP.flags = { sms: !!(flags && flags.sms === true), signup: !!(flags && flags.signup === true) };
+    VIP.flags = { sms: !!(flags && flags.sms === true), signup: !!(flags && flags.signup === true),
+        usernamePrefix: (flags && typeof flags.usernamePrefix === 'string') ? flags.usernamePrefix : 'g1' }; // #328
     const h = document.documentElement;
     h.classList.toggle('sms-off', !VIP.flags.sms);
     h.classList.toggle('signup-off', !VIP.flags.signup);
@@ -61,7 +62,7 @@ VIP.applyAccessFlags = function (flags) {
 VIP.loadAccessFlags = function (attempt) {
     fetch(`${VIP.config.API_URL}/api/config/access`, { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('http ' + r.status)); })
-        .then(function (j) { VIP.applyAccessFlags({ sms: j.smsEnabled === true, signup: j.registrationEnabled === true }); })
+        .then(function (j) { VIP.applyAccessFlags({ sms: j.smsEnabled === true, signup: j.registrationEnabled === true, usernamePrefix: j.usernamePrefix }); })
         .catch(function () {
             // Red lenta (Tor/3G): un par de reintentos; mientras tanto queda lo cacheado.
             if ((attempt || 0) < 2) setTimeout(function () { VIP.loadAccessFlags((attempt || 0) + 1); }, 4000 * ((attempt || 0) + 1));

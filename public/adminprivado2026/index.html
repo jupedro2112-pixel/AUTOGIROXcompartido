@@ -2976,8 +2976,8 @@ document.addEventListener('change', function (ev) {
                                 <!-- Defaults del alta rápida (pedido owner 2026-08-07): el usuario
                                      arranca con "gx" (el agente completa: gxhector2) y la clave con
                                      "asd123" (editable). Tras crear, ambos VUELVEN a estos defaults. -->
-                                <input type="text" id="paNewUsername" value="gx" maxlength="30" placeholder="ej: gxhector2" autocomplete="off" style="width:100%;padding:10px;background:#1a1a2e;color:#fff;border:1px solid rgba(212,175,55,0.3);border-radius:6px;box-sizing:border-box;">
-                                <small style="color:#888;font-size:11px;">Completá después del "gx" (ej. gxhector2). 3-30 caracteres: letras, números, punto, guion o guion bajo.</small>
+                                <input type="text" id="paNewUsername" value="" maxlength="30" placeholder="ej: g1hector2" autocomplete="off" style="width:100%;padding:10px;background:#1a1a2e;color:#fff;border:1px solid rgba(212,175,55,0.3);border-radius:6px;box-sizing:border-box;">
+                                <small style="color:#888;font-size:11px;">Completá después del prefijo (<span class="usernamePrefixTxt">g1</span>hector2). Se cambia en COMANDOS → /sys_usuario_prefijo. 3-30 caracteres: letras, números, punto, guion o guion bajo.</small>
                             </div>
                             <div>
                                 <label style="color:#aaa;font-size:12px;display:block;margin-bottom:4px;">Contraseña *</label>
@@ -3304,7 +3304,7 @@ document.addEventListener('change', function (ev) {
                     <label for="newUserUsername">Usuario:</label>
                     <!-- Arranca con "gx" precargado (pedido owner 2026-08-07) — es solo
                          un default, el agente lo completa (gxhector2) o lo borra. -->
-                    <input type="text" id="newUserUsername" value="gx" placeholder="gxnombre">
+                    <input type="text" id="newUserUsername" value="" placeholder="g1nombre">
                 </div>
                 <div class="form-group">
                     <label for="newUserPassword">Contraseña:</label>

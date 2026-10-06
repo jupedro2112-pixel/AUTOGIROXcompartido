@@ -136,6 +136,39 @@ async function getAccessSwitches(opts) {
   return value;
 }
 
+// ============================================
+// PREFIJO de los usuarios nuevos (#328, owner 2026-10-06)
+// ============================================
+// Comando `/sys_usuario_prefijo` (sección COMANDOS): el texto es el prefijo con el
+// que arrancan los usuarios que crea la LANDING (prefijo + nombre + 3 dígitos,
+// ej. g1pedro042) y el que viene precargado (editable) en el alta del panel y
+// del publisher_admin. Default "g1". Vacío = sin prefijo. Solo letras, números
+// y guion bajo, hasta 6 caracteres (el username de 1girox es de 18 máx). Cache
+// de 60 s por instancia, como el % de referidos (#307).
+const USERNAME_PREFIX_COMMAND = '/sys_usuario_prefijo';
+const USERNAME_PREFIX_DEFAULT = 'g1';
+let _usernamePrefixCache = null; // { at, value }
+function _normUsernamePrefix(raw) {
+  const v = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!/^[a-z0-9_]{0,6}$/.test(v)) return null; // inválido → default
+  return v;
+}
+async function getUsernamePrefix() {
+  const now = Date.now();
+  if (_usernamePrefixCache && (now - _usernamePrefixCache.at) < 60000) return _usernamePrefixCache.value;
+  let value = USERNAME_PREFIX_DEFAULT;
+  try {
+    const cmd = await Command.findOne({ name: USERNAME_PREFIX_COMMAND, isActive: true }).lean();
+    if (cmd) {
+      const n = _normUsernamePrefix(cmd.response);
+      if (n === null) logger.warn(`[usuario-prefijo] ${USERNAME_PREFIX_COMMAND} inválido ("${String(cmd.response).slice(0, 20)}") → se usa "${USERNAME_PREFIX_DEFAULT}"`);
+      else value = n;
+    }
+  } catch (_) {}
+  _usernamePrefixCache = { at: now, value };
+  return value;
+}
+
 // Los DOS únicos caminos a SNS pasan por acá: con el SMS apagado no se llama al
 // servicio (ni se crea el OtpCode). No importar otpService/smsService directo.
 async function generateAndSendOTP(...args) {
@@ -3867,7 +3900,7 @@ app.use(async (req, res, next) => {
 app.get('/api/config/access', async (req, res) => {
   const sw = await getAccessSwitches();
   res.set('Cache-Control', 'no-store');
-  res.json({ smsEnabled: sw.smsEnabled, registrationEnabled: sw.registrationOpen });
+  res.json({ smsEnabled: sw.smsEnabled, registrationEnabled: sw.registrationOpen, usernamePrefix: await getUsernamePrefix() });
 });
 
 // Panel → Configuración → "📵 SMS y registro" (solo admin general).
@@ -4690,21 +4723,24 @@ app.post('/api/auth/register-quick', authLimiter, registerIpLimiter, async (req,
 //   • Kill-switch: LANDING_SIGNUP_DISABLED=true lo apaga sin tocar código.
 //   • Anti-abuso: límite por IP (landingIpLimiter). Hook opcional de captcha:
 //     si algún día se configura, validar req.body.captchaToken antes de crear.
-function _sanitizeUsernameBase(name) {
+function _sanitizeUsernameBase(name, prefix) {
+  const pre = typeof prefix === 'string' ? prefix : USERNAME_PREFIX_DEFAULT;
   const noAccents = String(name || '')
     .normalize('NFD').replace(/[̀-ͯ]/g, '');
   let base = noAccents.toLowerCase().replace(/[^a-z0-9]/g, '');
-  // 'gx' (2) + base (≤13) + sufijo (≤3) = 18 máx (límite de 1girox).
-  if (base.length > 13) base = base.slice(0, 13);
-  // TODOS los usuarios de la landing arrancan con "gx" (owner 2026-08-19).
-  return 'gx' + base;
+  // prefijo + base + sufijo (3) = 18 máx (límite de 1girox).
+  const maxBase = Math.max(1, 18 - pre.length - 3);
+  if (base.length > maxBase) base = base.slice(0, maxBase);
+  // TODOS los usuarios de la landing arrancan con el prefijo del comando
+  // `/sys_usuario_prefijo` (#328; antes "gx" fijo, owner 2026-08-19).
+  return pre + base;
 }
 async function _deriveUniqueUsername(name) {
-  const base = _sanitizeUsernameBase(name);
+  const base = _sanitizeUsernameBase(name, await getUsernamePrefix());
   for (let i = 0; i < 12; i++) {
-    // Sufijo de MÁXIMO 3 dígitos (owner 2026-08-19; antes eran 3-6 y quedaban
-    // usuarios tipo juan29352). 0-999 sin padding → "7", "42", "813".
-    const suffix = String(crypto.randomInt(0, 1000));
+    // Sufijo de EXACTAMENTE 3 dígitos (owner 2026-10-06, #328: "g1NOMBRE3digitos";
+    // antes 0-999 sin padding). 000-999 → "007", "042", "813".
+    const suffix = String(crypto.randomInt(0, 1000)).padStart(3, '0');
     const candidate = base + suffix;
     if (!girox.validateUsername(candidate).valid) continue;
     const taken = await findUserByUsernameCI(candidate, { lean: true });
@@ -11895,6 +11931,12 @@ async function initializeData() {
       description: 'Mensaje automático cuando el cliente abre el SOPORTE del widget del casino (máx. 1 vez cada 6hs por cliente). Si lo dejás vacío, no se envía.',
       type: 'message',
       response: '👋 ¡Bienvenido al SOPORTE de 1Girox!\n\nContanos tu consulta y te damos una solución al toque. 🎧'
+    },
+    {
+      name: '/sys_usuario_prefijo',
+      description: 'PREFIJO de los usuarios nuevos: con qué letras arranca el usuario que crea la LANDING (prefijo + nombre + 3 dígitos, ej. g1pedro042) y el que viene precargado en el alta del panel y del publicista (editable). Solo letras, números y guion bajo, hasta 6. Vacío = sin prefijo.',
+      type: 'message',
+      response: 'g1'
     },
     {
       name: '/sys_referidos_pct',

@@ -8,6 +8,24 @@
 
 ## Sesión 2026-10-06
 
+### 328. Prefijo de los usuarios nuevos editable en COMANDOS (`/sys_usuario_prefijo`, default "g1")
+- Owner: "que los usuarios que se creen de la landing se creen con g1NOMBRE3dígitos; si crea
+  usuario el panel de admin que arranque con g1 (modificable); que se pueda cambiar el inicio
+  en COMANDOS".
+- Comando nuevo `/sys_usuario_prefijo` (sembrado con `g1`; solo letras/números/guion bajo,
+  hasta 6; vacío = sin prefijo; inválido → default con warn). `getUsernamePrefix()` en
+  server.js, cache 60 s por instancia (mismo patrón que `/sys_referidos_pct`).
+- **Landing:** `_deriveUniqueUsername` = prefijo + nombre saneado + **3 dígitos exactos**
+  (`000-999`, antes 0-999 sin padding) → `g1pedro042`; la base se recorta para no pasar los
+  18 caracteres de 1girox. Antes era "gx" fijo (#195).
+- **Panel (admin-sw v74):** el alta de usuario del admin y la del publisher_admin arrancan
+  con el prefijo precargado (editable) en vez de "gx"; se lee de `GET /api/config/access`
+  (campo nuevo `usernamePrefix`). La validación "quedó el prefijo solo" usa el vigente.
+- **PWA (SW v197):** el registro (cuando está abierto) precarga el mismo prefijo vía
+  `VIP.flags.usernamePrefix`.
+- Los usuarios ya creados no cambian. **Probado:** `node --check` en los 6 archivos y la
+  derivación aislada. **Back necesita deploy** (siembra el comando al arrancar).
+
 ### 327. Landing multi-sitio: elige el backend por dominio o por `?s=CLAVE` (un solo proyecto de Vercel)
 - Owner: con el clon (`rapidogirox.com`; primero iba a ser autogirox.com) la landing de Vercel seguía pegándole a
   `1giroxauto.com` ("Código de pauta inválido o inactivo" para una campaña creada en el
