@@ -624,7 +624,7 @@ VIP.ui = (function () {
     // Si hay otro modal abierto (cambio de clave, bienvenida, instalación…) espera a que se
     // cierre (reintenta hasta ~2 min) y recién ahí marca "mostrado".
     let _refPromoTimer = null;
-    const REF_PROMO_COOLDOWN_MS = 30 * 60 * 1000; // "cada vez que abren la app": si pasaron 30 min, otra vez
+    const REF_PROMO_COOLDOWN_MS = 24 * 60 * 60 * 1000; // #319 (owner): 1 vez cada 24 h por dispositivo (antes 30 min)
     function maybeShowReferralPromo() {
         const u = VIP.state.currentUser;
         if (!u || (u.role && u.role !== 'user')) { console.info('[ref-promo] no se muestra: cuenta de staff o usuario no cargado'); return; }

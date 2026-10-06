@@ -8,6 +8,11 @@
 
 ## Sesión 2026-10-06
 
+### 319. Popup de referidos: 1 vez cada 24 h (antes cada 30 min)
+- Owner. `REF_PROMO_COOLDOWN_MS` = 24 h (ui.js, por dispositivo vía `localStorage
+  vip_refPromoAt`); `?refpromo=1` lo sigue forzando. SW → v194, `ui.js?v=319`,
+  `auth.js?v=319`. Solo front.
+
 ### 318. Botón "🤝 Mis referidos" en el pie del widget (al lado de "Mis datos")
 - Owner: al tocar Depositar desaparece el banner de referidos del inicio y ya no se encuentra
   la sección. Pie del widget: 🤖 Asistente · 🪪 Mis datos · **🤝 Mis referidos** →

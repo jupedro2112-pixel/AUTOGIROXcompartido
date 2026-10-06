@@ -833,7 +833,7 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   - Cliente: `GET /api/referrals/dashboard` (link, totales, tabla por referido con el
     netwin del MES en vivo — mes ART en curso, cache 15 min por usuario, concurrencia 4,
     tope 60 — y el nivel/próximo nivel). PWA: modal `#referralModal` + popup
-    `#referralPromoModal` (1× cada 30 min, `?refpromo=1` lo fuerza) + chooser de compartir
+    `#referralPromoModal` (1× cada 24 h por dispositivo — #319, `?refpromo=1` lo fuerza) + chooser de compartir
     (WhatsApp / Telegram / share nativo / copiar; texto = `/sys_referidos_compartir`).
     Ambos con z-index 2147483000 (arriba del casino y del hub). La tarjeta "Invitá y ganá"
     de PREMIOS y el banner del asistente abren ese modal; `/api/rewards/summary` manda
@@ -1046,7 +1046,7 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `utils/referralRate.resolveReferralRate()` (= `refreshReferralRateFromCommand`, solo relee
   el % plano del comando). Para plata o copy, SIEMPRE la del servicio de niveles. El
   `/api/referrals/dashboard` consulta 1girox por referido con cargas (cache 15 min, tope 60):
-  no llamarlo en el arranque del cliente en modo casino (solo el popup cada 30 min / el
+  no llamarlo en el arranque del cliente en modo casino (solo el popup 1× cada 24 h / el
   modal). `/api/referrals/admin/activity` NO consulta 1girox. Nada de premios en plata por
   cantidad de referidos.
 - **Secrets por SSM**: no leer `process.env.X` al require; lazy getters. Los módulos

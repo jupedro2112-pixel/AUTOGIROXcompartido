@@ -518,7 +518,7 @@ VIP.auth = (function () {
                     // clave). Al cliente en el casino no se le pide: consulta netwin en 1girox.
                     if (VIP.ui.loadReferralHomeCard) VIP.ui.loadReferralHomeCard();
                 }
-                if (VIP.ui.maybeShowReferralPromo) VIP.ui.maybeShowReferralPromo(); // #317 popup (cooldown 30 min)
+                if (VIP.ui.maybeShowReferralPromo) VIP.ui.maybeShowReferralPromo(); // #317 popup (1× cada 24 h, #319)
 
                 // Entrada por la landing (`ir=casino`): el casino normalmente YA
                 // está abierto (tryAccessLink lo dispara apenas llega el token,
@@ -894,7 +894,7 @@ VIP.auth = (function () {
             VIP.fire.loadFireStatus();
             if (VIP.ui.loadReferralHomeCard) VIP.ui.loadReferralHomeCard();   // #317 card INVITÁ A TUS AMIGOS
         }
-        if (VIP.ui.maybeShowReferralPromo) VIP.ui.maybeShowReferralPromo(); // #317 popup (1× cada 30 min)
+        if (VIP.ui.maybeShowReferralPromo) VIP.ui.maybeShowReferralPromo(); // #317 popup (1× cada 24 h, #319)
         VIP.ui.loadCanalInformativoUrl();
         refreshVerifyPhoneBanner();
         if (VIP.appTest && VIP.appTest.maybeShowAppCheck) VIP.appTest.maybeShowAppCheck();
