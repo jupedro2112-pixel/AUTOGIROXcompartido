@@ -11,10 +11,11 @@
   → se le MUESTRAN usuario y clave → entra logueado al chat/casino.
 
   CONFIGURAR (constantes abajo del script):
-    API_BASE       → https://1giroxauto.com
+    SITES          → un backend + su oferta por cada sitio (original, autogirox…)
+    HOST_TO_SITE   → qué sitio usa cada dominio de la landing (varios dominios en
+                     el MISMO proyecto de Vercel); o ?s=CLAVE en el link
     CAMPAIGN_CODE  → código de campaña fijo, o vacío para tomarlo de la URL
                      (?p=CODIGO, ?campaign=CODIGO, o el path /CODIGO)
-    BONUS_BIG/SUB  → el texto del bono (cambialo por tu oferta real)
 
   BACKEND: agregá el dominio de esta landing a ALLOWED_ORIGINS (SSM) o el
   navegador bloquea la llamada por CORS.
@@ -216,15 +217,45 @@
 <script>
 (function () {
   // ==== CONFIGURAR ====
-  var API_BASE_DEFAULT = 'https://1giroxauto.com';  // backend real (producción)
+  // Una misma landing puede servir a VARIOS sitios (cada uno con su backend y su
+  // oferta). El sitio se elige, en este orden:
+  //   1) por el DOMINIO desde el que se abre la landing (HOST_TO_SITE) — para
+  //      tener varios dominios en el MISMO proyecto de Vercel (Settings → Domains);
+  //   2) por el parámetro ?s=CLAVE del link (ej. ?p=CODIGO&s=autogirox);
+  //   3) si no, el sitio DEFAULT_SITE.
+  // Solo se puede elegir entre los sitios de esta lista: nadie puede mandar la
+  // landing a un backend ajeno desde el link.
+  var SITES = {
+    original: { api: 'https://1giroxauto.com', bonusBig: '100%', bonusSub: 'EN TU PRIMERA CARGA' },
+    autogirox: { api: 'https://autogirox.com', bonusBig: '50%', bonusSub: 'EN TU PRIMERA CARGA' }
+  };
+  var DEFAULT_SITE = 'original';
+  var HOST_TO_SITE = {                               // dominio de la landing → sitio
+    'grupogirox.com': 'original', 'www.grupogirox.com': 'original'
+    // 'landing.autogirox.com': 'autogirox'
+  };
   var CAMPAIGN_CODE = '';                            // fijo, o vacío = tomar de la URL
-  var BONUS_BIG = '100%';                             // ⚠️ tu oferta REAL
-  var BONUS_SUB = 'EN TU PRIMERA CARGA';
   // ====================
 
-  // Override del backend por URL (para PROBAR contra otro entorno sin editar el
-  // archivo): agregá ?api=https://tuapp.onrender.com a la URL. Sin ese parámetro
-  // usa el backend de producción. Solo se acepta https://.
+  var SITE_KEY = DEFAULT_SITE;
+  try {
+    var _h = String(location.hostname || '').toLowerCase();
+    if (HOST_TO_SITE[_h] && SITES[HOST_TO_SITE[_h]]) SITE_KEY = HOST_TO_SITE[_h];
+    var _s = new URLSearchParams(location.search).get('s');
+    if (_s && SITES[_s]) SITE_KEY = _s;
+  } catch (e) {}
+  var SITE = SITES[SITE_KEY];
+  var API_BASE_DEFAULT = SITE.api;                   // backend real del sitio elegido
+  var BONUS_BIG = SITE.bonusBig;                      // ⚠️ la oferta REAL de ese sitio
+  var BONUS_SUB = SITE.bonusSub;
+  // La marca "ya tenés cuenta" (localStorage) es por sitio: una cuenta creada en
+  // un backend no existe en el otro. El sitio default conserva la clave histórica.
+  var SIGNED_KEY = SITE_KEY === DEFAULT_SITE ? 'girox_signed' : 'girox_signed_' + SITE_KEY;
+
+  // Override del backend por URL (SOLO para PROBAR contra otro entorno sin editar
+  // el archivo): ?api=https://tuapp.onrender.com. No usarlo en links de pauta:
+  // un visitante común no puede aceptar certificados inválidos y el link queda
+  // atado a ese servidor. Solo se acepta https://.
   var API_BASE = API_BASE_DEFAULT;
   try {
     var _apiOverride = new URLSearchParams(location.search).get('api');
@@ -438,7 +469,7 @@
         // DEDUP (pedido del partner Pulse, 2026-08-22): recordar en ESTE
         // dispositivo que ya se registró → si vuelve a la landing NO crea otra
         // cuenta ni dispara otro evento de registro a Meta.
-        try { localStorage.setItem('girox_signed', res.d.username || '1'); } catch (e) {}
+        try { localStorage.setItem(SIGNED_KEY, res.d.username || '1'); } catch (e) {}
         // Registro en el NAVEGADOR con el MISMO event_id que la CAPI (reg_<id>)
         // → Meta DEDUPLICA browser+server. fbq usa sendBeacon: sobrevive a la
         // redirección de abajo (owner 2026-08-26).
@@ -479,7 +510,7 @@
   // dispara otro evento a Meta. Se ofrece ENTRAR a la cuenta existente.
   (function () {
     var signed = null;
-    try { signed = localStorage.getItem('girox_signed'); } catch (e) {}
+    try { signed = localStorage.getItem(SIGNED_KEY); } catch (e) {}
     if (!signed) return;
 
     // LAST-TOUCH (owner 2026-08-22): si el jugador YA registrado vuelve por OTRA

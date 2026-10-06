@@ -8,6 +8,27 @@
 
 ## Sesión 2026-10-06
 
+### 327. Landing multi-sitio: elige el backend por dominio o por `?s=CLAVE` (un solo proyecto de Vercel)
+- Owner: con el clon (`autogirox.com`) la landing de Vercel seguía pegándole a
+  `1giroxauto.com` ("Código de pauta inválido o inactivo" para una campaña creada en el
+  clon). Preguntó si se puede sumar otro backend al MISMO proyecto de Vercel.
+- `landing/index.html`: tabla `SITES` (clave → `{api, bonusBig, bonusSub}`: `original` =
+  1giroxauto.com / 100%, `autogirox` = autogirox.com / 50%), `HOST_TO_SITE` (dominio de la
+  landing → sitio, para tener varios dominios en el mismo proyecto: Vercel → Settings →
+  Domains) y `DEFAULT_SITE`. Orden: dominio > `?s=CLAVE` > default. Solo se puede elegir
+  entre los sitios de la lista (no se puede mandar a un backend ajeno desde el link).
+  `?api=` queda SOLO para pruebas. La marca "ya tenés cuenta" (`localStorage`) es por sitio
+  (`girox_signed_<clave>`; el default conserva `girox_signed`).
+- Uso: link del publicista del clon = `https://<landing>/?p=CODIGO&s=autogirox`, o un
+  dominio propio mapeado en `HOST_TO_SITE` y el link queda `https://<dominio>/?p=CODIGO`.
+- ⚠️ El backend del sitio tiene que tener certificado válido en su dominio: el fetch de la
+  landing desde otro origen no puede aceptar certificados inválidos (la URL
+  `*.elasticbeanstalk.com` del clon NO sirve: tiene el certificado de auto1girox.com). Y la
+  oferta de `SITES` tiene que ser la real de cada sitio (Meta).
+- Probado: el script inline parsea; la elección de sitio probada aislada. La landing se
+  publica con el push si el proyecto de Vercel está conectado a este repo; si está conectado
+  a otro repo, conectar uno nuevo a este.
+
 ### 326. Reenvío de los avisos de hgcash a OTRAS páginas, configurable desde el panel (antes solo SSM)
 - Owner (captura de la card de hgcash): "si una misma página comparte cuenta hgcash, falta el
   SSM cargar para enviar los mismos webhooks a la otra página para poder recibir las
