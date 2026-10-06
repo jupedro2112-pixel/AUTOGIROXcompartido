@@ -5,7 +5,8 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-06** — tope del bono de bienvenida para cualquier % (#324, §5).
+> Última actualización: **2026-10-06** — reenvío de webhooks hgcash desde el panel (#326, §5).
+> Antes ese mismo día: tope del bono de bienvenida para cualquier % (#324, §5).
 > Antes ese mismo día: trampas del entorno EB clonado (#323, §9).
 > Antes ese mismo día: interruptores de SMS y registro (#322: §3, §5, §6,
 > §9; SMS y auto-registro APAGADOS por default, se prenden desde el panel). De paso se
@@ -761,8 +762,13 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   índice único de HgcashCharge de nuestro lado y la idempotencia de 1girox del otro) →
   Transaction + mensaje + SLA. Fallo → se BORRA el HgcashCharge y es reintentable hasta
   3 veces (la reference estable impide que el reintento duplique la carga).
-  **Fan-out** (#94): reenvía el webhook crudo+firma a autoreembolsos.com
-  (`HGCASH_FANOUT_URL`, 'off' para apagar).
+  **Fan-out** (#94, panel desde #326): hgcash permite UNA URL de webhook por cuenta; la
+  página que la tiene reenvía el webhook crudo+firma a las otras páginas que comparten la
+  cuenta (cada una matchea SUS comprobantes). Destinos: `Config['hgcashFanout'].urls` (panel
+  → Banco automático → "🔁 Reenviar los avisos…", hasta 5, `GET/POST/DELETE
+  /api/admin/hgcash/fanout`); si ese Config no existe vale `HGCASH_FANOUT_URL` ('off' =
+  apagado). Anti-círculo: un webhook que llega con `X-Forwarded-By` NO se vuelve a
+  reenviar, y nunca se reenvía a la URL propia. El destino necesita el MISMO secreto.
 - **Regla de APERTURA/CIERRE de chats (owner 2026-08-25/26, #243/#246):** el chat
   va a **Abiertos** SOLO cuando hace falta un agente; si todo fue automático, queda o
   vuelve a **Cerrado**. Concretamente:

@@ -8,6 +8,36 @@
 
 ## Sesión 2026-10-06
 
+### 326. Reenvío de los avisos de hgcash a OTRAS páginas, configurable desde el panel (antes solo SSM)
+- Owner (captura de la card de hgcash): "si una misma página comparte cuenta hgcash, falta el
+  SSM cargar para enviar los mismos webhooks a la otra página para poder recibir las
+  transferencias y cargarlas también". El fan-out (#94) existía pero su destino era UNO solo
+  y vivía en `HGCASH_FANOUT_URL` (SSM/env, con autoreembolsos.com como default).
+- **`Config['hgcashFanout'] = { urls: [...] }`** (hasta 5). Si el Config existe manda el panel
+  (lista vacía = no reenviar); si no existe, sigue `HGCASH_FANOUT_URL` como antes. Cache 30 s
+  por instancia (`_getHgcashFanout`). `GET/POST/DELETE /api/admin/hgcash/fanout` (solo admin
+  general): valida https + dominio público, completa `/api/hgcash/webhook` si pegan solo el
+  dominio, deduplica y rechaza la URL de la propia página.
+- **Anti-círculo (nuevo):** un aviso que llega con `X-Forwarded-By` (ya reenviado por otra
+  página) NO se vuelve a reenviar, y nunca se reenvía a la URL propia (`PUBLIC_BASE_URL` +
+  `/api/hgcash/webhook`). Consecuencia: la página que tiene el webhook cargado en hgcash es la
+  ÚNICA que reparte y tiene que listar a TODAS las demás (no hay cadenas A→B→C).
+- **Panel (admin-sw v73):** recuadro celeste "🔁 Reenviar los avisos de hgcash a otras
+  páginas" debajo de "Cuenta hgcash conectada": textarea (una dirección por línea), la URL
+  de ESTA página para copiar, Guardar / "Volver a usar AWS (SSM)" y, por destino, el último
+  resultado (✅ OK / ❌ error con motivo, contadores desde el último reinicio — por
+  instancia).
+- **Requisitos del lado de la otra página:** el MISMO secreto del webhook (el de la cuenta
+  hgcash compartida; se puede cargar en su card "Cuenta hgcash conectada"), banco automático
+  activado y `PUBLIC_BASE_URL` correcto. Si está detrás de Cloudflare, regla WAF "Skip" para
+  `/api/hgcash/webhook` (403 en el estado del reenvío = eso).
+- **Probado:** `node --check` (server.js, admin.js, admin-sw.js), divs del panel balanceados
+  y la validación de direcciones aislada (https OK; http / localhost / IP privada / texto
+  suelto rechazados; la URL propia se reconoce con mayúsculas y barra final). **Back necesita
+  deploy** en la página que REPARTE. PROBAR: cargar la dirección de la otra página → hacer
+  una transferencia → el recuadro muestra "✅ último reenvío OK" y el movimiento aparece en
+  "Movimientos del banco" de la otra página.
+
 ### 325. Reembolso diario: BOTÓN "Apagar / Encender" que guarda al instante (el tilde no se encontraba)
 - Owner: "no encuentro para apagar el reembolso diario". El interruptor existía (#297) pero
   era un tilde chico pegado a un título dentro de la card "Rangos de reembolso", y recién

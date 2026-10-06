@@ -6290,6 +6290,74 @@ async function clearHgcashCredentials() {
 }
 window.loadHgcashCredentials = loadHgcashCredentials; window.saveHgcashCredentials = saveHgcashCredentials; window.clearHgcashCredentials = clearHgcashCredentials;
 
+// ====== #326 Reenvío (fan-out) de los avisos de hgcash a otras páginas ======
+// Config['hgcashFanout'] vía /api/admin/hgcash/fanout (solo admin general). Con
+// config del panel manda el panel; sin ella vale HGCASH_FANOUT_URL de AWS (SSM).
+function _hgcashFanoutRender(j) {
+    const st = document.getElementById('hgcashFanoutStatus');
+    const ta = document.getElementById('hgcashFanoutUrls');
+    const own = document.getElementById('hgcashFanoutOwnUrl');
+    if (own) own.textContent = j.ownUrl || '';
+    if (ta) ta.value = (j.source === 'panel' ? (j.urls || []) : []).join('\n');
+    if (!st) return;
+    let h;
+    if (j.source === 'panel') {
+        h = (j.urls && j.urls.length)
+            ? '📤 Reenviando a <b style="color:#66ff99;">' + j.urls.length + ' página' + (j.urls.length === 1 ? '' : 's') + '</b> (cargado desde el PANEL)'
+            : '⏸️ <b style="color:#ffd479;">Sin reenvío</b> (lista vacía cargada desde el PANEL)';
+    } else {
+        h = j.envUrl
+            ? '📤 Reenviando a <b style="color:#ffd479;">' + escapeHtml(j.envUrl) + '</b> — valor de AWS (SSM). Cargá la lista acá abajo para manejarlo desde el panel.'
+            : '⏸️ <b style="color:#ffd479;">Sin reenvío</b> — AWS (SSM) lo tiene apagado y no hay nada cargado en el panel.';
+    }
+    (j.stats || []).forEach(function (s) {
+        let est;
+        if (!s.lastAt) est = '<span style="color:#888;">todavía no se reenvió ningún aviso desde el último reinicio</span>';
+        else if (s.lastOk) est = '<span style="color:#66ff99;">✅ último reenvío OK</span> · ' + fmtFechaHoraAR(s.lastAt) + ' · ' + s.ok + ' entregados' + (s.fail ? ', ' + s.fail + ' fallidos' : '');
+        else est = '<span style="color:#ff8080;">❌ último reenvío FALLÓ</span> · ' + fmtFechaHoraAR(s.lastAt) + ' · ' + escapeHtml(s.lastError || '') + ' (' + s.ok + ' entregados, ' + s.fail + ' fallidos)';
+        h += '<br>• <code>' + escapeHtml(s.url) + '</code><br>&nbsp;&nbsp;' + est;
+    });
+    st.innerHTML = h;
+}
+async function loadHgcashFanout() {
+    const box = document.getElementById('hgcashFanoutBox');
+    if (!box) return;
+    try {
+        const r = await authFetch('/api/admin/hgcash/fanout');
+        if (!r.ok) { box.style.display = 'none'; return; }
+        box.style.display = '';
+        _hgcashFanoutRender(await r.json());
+    } catch (_) { const st = document.getElementById('hgcashFanoutStatus'); if (st) st.textContent = 'No se pudo leer el estado.'; }
+}
+async function saveHgcashFanout() {
+    const m = document.getElementById('hgcashFanoutMsg');
+    const urls = (document.getElementById('hgcashFanoutUrls').value || '').split(/[\n,]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+    const aviso = urls.length
+        ? 'Cada aviso de hgcash que reciba ESTA página se va a reenviar a:\n\n' + urls.join('\n') + '\n\nLa otra página necesita el MISMO secreto del webhook. ¿Guardar?'
+        : 'La lista está vacía: ESTA página deja de reenviar los avisos de hgcash a otras. ¿Guardar?';
+    if (!confirm(aviso)) return;
+    try {
+        const r = await authFetch('/api/admin/hgcash/fanout', { method: 'POST', body: JSON.stringify({ urls: urls }) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } return; }
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado'; }
+        _hgcashFanoutRender(j);
+        showToast('Reenvío de avisos hgcash actualizado', 'success');
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+async function clearHgcashFanout() {
+    if (!confirm('¿Borrar la lista cargada en el panel y volver a usar el valor de AWS (SSM), HGCASH_FANOUT_URL?')) return;
+    const m = document.getElementById('hgcashFanoutMsg');
+    try {
+        const r = await authFetch('/api/admin/hgcash/fanout', { method: 'DELETE' });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo'); } return; }
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Volvió a usar AWS (SSM)'; }
+        _hgcashFanoutRender(j);
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+window.loadHgcashFanout = loadHgcashFanout; window.saveHgcashFanout = saveHgcashFanout; window.clearHgcashFanout = clearHgcashFanout;
+
 async function loadHgcashConfig() {
     const form = document.getElementById('hgcashConfigForm');
     const movPanel = document.getElementById('hgcashMovementsPanel');
@@ -6304,6 +6372,7 @@ async function loadHgcashConfig() {
         if (form) form.style.display = '';
         if (movPanel) movPanel.style.display = '';
         loadHgcashCredentials(); // #320
+        loadHgcashFanout(); // #326
         loadHgcashMovements(1);
         loadHgcashBalance();
         startHgcashLive();
