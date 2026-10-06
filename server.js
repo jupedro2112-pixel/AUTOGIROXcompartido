@@ -139,12 +139,16 @@ async function getAccessSwitches(opts) {
 // ============================================
 // PREFIJO de los usuarios nuevos (#328, owner 2026-10-06)
 // ============================================
-// Comando `/sys_usuario_prefijo` (sección COMANDOS): el texto es el prefijo con el
-// que arrancan los usuarios que crea la LANDING (prefijo + nombre + 3 dígitos,
-// ej. g1pedro042) y el que viene precargado (editable) en el alta del panel y
-// del publisher_admin. Default "g1". Vacío = sin prefijo. Solo letras, números
-// y guion bajo, hasta 6 caracteres (el username de 1girox es de 18 máx). Cache
-// de 60 s por instancia, como el % de referidos (#307).
+// Card "🔤 Prefijo de los usuarios nuevos" (panel → Configuración, solo admin
+// general; owner: "una sección, no un comando — el admin mira opciones de admin").
+// `Config['usernamePrefix']` = el prefijo con el que arrancan los usuarios que crea
+// la LANDING (prefijo + nombre + 3 dígitos, ej. g1pedro042) y el que viene
+// precargado (editable) en el alta del panel y del publisher_admin. Default "g1".
+// Vacío = sin prefijo. Solo letras, números y guion bajo, hasta 6 caracteres (el
+// username de 1girox es de 18 máx). Cache de 60 s por instancia. Compat: si no
+// hay Config pero quedó sembrado el comando `/sys_usuario_prefijo` (versión
+// intermedia del mismo día), se lee de ahí.
+const USERNAME_PREFIX_KEY = 'usernamePrefix';
 const USERNAME_PREFIX_COMMAND = '/sys_usuario_prefijo';
 const USERNAME_PREFIX_DEFAULT = 'g1';
 let _usernamePrefixCache = null; // { at, value }
@@ -158,11 +162,14 @@ async function getUsernamePrefix() {
   if (_usernamePrefixCache && (now - _usernamePrefixCache.at) < 60000) return _usernamePrefixCache.value;
   let value = USERNAME_PREFIX_DEFAULT;
   try {
-    const cmd = await Command.findOne({ name: USERNAME_PREFIX_COMMAND, isActive: true }).lean();
-    if (cmd) {
-      const n = _normUsernamePrefix(cmd.response);
-      if (n === null) logger.warn(`[usuario-prefijo] ${USERNAME_PREFIX_COMMAND} inválido ("${String(cmd.response).slice(0, 20)}") → se usa "${USERNAME_PREFIX_DEFAULT}"`);
-      else value = n;
+    const saved = await getConfig(USERNAME_PREFIX_KEY, null);
+    if (typeof saved === 'string') {
+      const n = _normUsernamePrefix(saved);
+      if (n !== null) value = n;
+    } else {
+      const cmd = await Command.findOne({ name: USERNAME_PREFIX_COMMAND, isActive: true }).lean();
+      const n = cmd ? _normUsernamePrefix(cmd.response) : null;
+      if (n !== null) value = n;
     }
   } catch (_) {}
   _usernamePrefixCache = { at: now, value };
@@ -3932,6 +3939,24 @@ app.post('/api/admin/access-switches', authMiddleware, adminMiddleware, async (r
     logger.error(`Error guardando access-switches: ${error.message}`);
     res.status(500).json({ error: 'Error del servidor' });
   }
+});
+
+// Panel → Configuración → "🔤 Prefijo de los usuarios nuevos" (solo admin general, #328).
+app.get('/api/admin/username-prefix', authMiddleware, adminMiddleware, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+  _usernamePrefixCache = null;
+  res.json({ prefix: await getUsernamePrefix(), default: USERNAME_PREFIX_DEFAULT });
+});
+app.post('/api/admin/username-prefix', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const n = _normUsernamePrefix(req.body && req.body.prefix);
+    if (n === null) return res.status(400).json({ error: 'Solo letras, números y guion bajo, hasta 6 caracteres (o vacío = sin prefijo).' });
+    await Config.set(USERNAME_PREFIX_KEY, n, req.user.username);
+    _usernamePrefixCache = null;
+    logger.info(`[usuario-prefijo] ${req.user.username} lo cambió a "${n}"`);
+    res.json({ success: true, prefix: n, default: USERNAME_PREFIX_DEFAULT });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // ============================================
@@ -11931,12 +11956,6 @@ async function initializeData() {
       description: 'Mensaje automático cuando el cliente abre el SOPORTE del widget del casino (máx. 1 vez cada 6hs por cliente). Si lo dejás vacío, no se envía.',
       type: 'message',
       response: '👋 ¡Bienvenido al SOPORTE de 1Girox!\n\nContanos tu consulta y te damos una solución al toque. 🎧'
-    },
-    {
-      name: '/sys_usuario_prefijo',
-      description: 'PREFIJO de los usuarios nuevos: con qué letras arranca el usuario que crea la LANDING (prefijo + nombre + 3 dígitos, ej. g1pedro042) y el que viene precargado en el alta del panel y del publicista (editable). Solo letras, números y guion bajo, hasta 6. Vacío = sin prefijo.',
-      type: 'message',
-      response: 'g1'
     },
     {
       name: '/sys_referidos_pct',

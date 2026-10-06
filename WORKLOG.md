@@ -8,17 +8,21 @@
 
 ## Sesión 2026-10-06
 
-### 328. Prefijo de los usuarios nuevos editable en COMANDOS (`/sys_usuario_prefijo`, default "g1")
+### 328. Prefijo de los usuarios nuevos editable desde el panel (card en Configuración, default "g1")
 - Owner: "que los usuarios que se creen de la landing se creen con g1NOMBRE3dígitos; si crea
   usuario el panel de admin que arranque con g1 (modificable); que se pueda cambiar el inicio
   en COMANDOS".
-- Comando nuevo `/sys_usuario_prefijo` (sembrado con `g1`; solo letras/números/guion bajo,
-  hasta 6; vacío = sin prefijo; inválido → default con warn). `getUsernamePrefix()` en
-  server.js, cache 60 s por instancia (mismo patrón que `/sys_referidos_pct`).
+- Owner (segunda vuelta): "una sección, no un comando: el admin mira opciones de admin, no
+  sabe que si modifica comandos modifica todo". → Card **"🔤 Prefijo de los usuarios nuevos"**
+  en Configuración (arriba del rollover global; input + ejemplo en vivo + Guardar; solo admin
+  general): `GET/POST /api/admin/username-prefix` → `Config['usernamePrefix']`. Reglas: solo
+  letras/números/guion bajo, hasta 6; vacío = sin prefijo. `getUsernamePrefix()` cache 60 s.
+  El comando `/sys_usuario_prefijo` de la versión intermedia NO se siembra más; si quedó en
+  alguna base se lee solo como respaldo cuando no hay Config.
 - **Landing:** `_deriveUniqueUsername` = prefijo + nombre saneado + **3 dígitos exactos**
   (`000-999`, antes 0-999 sin padding) → `g1pedro042`; la base se recorta para no pasar los
   18 caracteres de 1girox. Antes era "gx" fijo (#195).
-- **Panel (admin-sw v74):** el alta de usuario del admin y la del publisher_admin arrancan
+- **Panel (admin-sw v75):** el alta de usuario del admin y la del publisher_admin arrancan
   con el prefijo precargado (editable) en vez de "gx"; se lee de `GET /api/config/access`
   (campo nuevo `usernamePrefix`). La validación "quedó el prefijo solo" usa el vigente.
 - **PWA (SW v197):** el registro (cuando está abierto) precarga el mismo prefijo vía

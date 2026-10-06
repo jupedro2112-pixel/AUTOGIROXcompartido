@@ -478,6 +478,53 @@ async function loadUsernamePrefix() {
 }
 loadUsernamePrefix();
 
+// Card "🔤 Prefijo de los usuarios nuevos" (Configuración, solo admin general).
+function _applyUsernamePrefix(p) {
+    USERNAME_PREFIX = p;
+    document.querySelectorAll('.usernamePrefixTxt').forEach(function (el) { el.textContent = p; });
+    ['paNewUsername', 'newUserUsername'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) { el.value = p; el.placeholder = p + 'nombre'; }
+    });
+}
+function usernamePrefixPreview() {
+    const h = document.getElementById('usernamePrefixHint'); if (!h) return;
+    const v = (document.getElementById('usernamePrefixInput').value || '').trim().toLowerCase();
+    if (v && !/^[a-z0-9_]{1,6}$/.test(v)) { h.style.color = '#ff6b6b'; h.textContent = 'Solo letras, números y guion bajo, hasta 6 caracteres.'; return; }
+    h.style.color = '#aaa';
+    h.textContent = (v ? 'Ej.: en la landing "Pedro" → ' + v + 'pedro042 · en el panel el campo arranca con "' + v + '".'
+        : 'Sin prefijo: en la landing "Pedro" → pedro042 · en el panel el campo arranca vacío.');
+}
+async function loadUsernamePrefixCard() {
+    const form = document.getElementById('usernamePrefixForm');
+    const header = document.getElementById('usernamePrefixHeader');
+    try {
+        const r = await authFetch('/api/admin/username-prefix');
+        if (!r.ok) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; return; }
+        if (form) form.style.display = '';
+        if (header) header.style.display = '';
+        const j = await r.json();
+        const inp = document.getElementById('usernamePrefixInput');
+        if (inp) inp.value = j.prefix || '';
+        _applyUsernamePrefix(typeof j.prefix === 'string' ? j.prefix : 'g1');
+        usernamePrefixPreview();
+    } catch (e) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
+}
+async function saveUsernamePrefix() {
+    const v = (document.getElementById('usernamePrefixInput').value || '').trim().toLowerCase();
+    if (v && !/^[a-z0-9_]{1,6}$/.test(v)) { showToast('Solo letras, números y guion bajo, hasta 6 caracteres', 'error'); return; }
+    if (!confirm(v ? 'Los usuarios nuevos van a arrancar con "' + v + '" (landing: ' + v + 'nombre + 3 dígitos). ¿Guardar?' : 'Los usuarios nuevos van a crearse SIN prefijo. ¿Guardar?')) return;
+    try {
+        const r = await authFetch('/api/admin/username-prefix', { method: 'POST', body: JSON.stringify({ prefix: v }) });
+        const j = await r.json();
+        if (!r.ok) { showToast(j.error || 'No se pudo guardar', 'error'); return; }
+        _applyUsernamePrefix(j.prefix);
+        usernamePrefixPreview();
+        showToast('Prefijo guardado: "' + (j.prefix || '(sin prefijo)') + '"', 'success');
+    } catch (e) { showToast('Error de conexión', 'error'); }
+}
+window.usernamePrefixPreview = usernamePrefixPreview; window.saveUsernamePrefix = saveUsernamePrefix; window.loadUsernamePrefixCard = loadUsernamePrefixCard;
+
 async function checkAdminSession() {
     try {
         const response = await fetch(`${API_URL}/api/admin/me`, {
@@ -5903,6 +5950,7 @@ async function loadCBUConfig() {
     loadInstantCashbackCfg();
     loadBonusRolloverCfg(); // #278
     loadAccessSwitches(); // #322
+    loadUsernamePrefixCard(); // #328
     // Cargar la config del bono de primera carga (solo admin general)
     loadFirstChargeBonus();
     // Cargar la config del banco automático (hgcash)
