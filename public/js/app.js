@@ -46,16 +46,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 100);
     }
 
-    // Auto-fill referral code from URL ?ref=CODE
+    // Auto-fill referral code from URL ?ref=CODE. #317 (réplica #168): el código se guarda 30 días
+    // y queda FIJO en el registro (un solo invitador por cuenta; el cliente no lo puede cambiar).
     const urlParams = new URLSearchParams(window.location.search);
-    const refCode   = urlParams.get('ref');
+    let refCode = (urlParams.get('ref') || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 12);
+    try {
+        if (refCode) localStorage.setItem('vip_ref', JSON.stringify({ code: refCode, at: Date.now() }));
+        else { const saved = JSON.parse(localStorage.getItem('vip_ref') || 'null'); if (saved && saved.code && Date.now() - saved.at < 30 * 86400000) refCode = saved.code; }
+    } catch (_) {}
     if (refCode) {
+        window._vipRefLocked = refCode;
         const refInput = document.getElementById('registerReferralCode');
-        if (refInput) refInput.value = refCode.toUpperCase();
+        if (refInput) { refInput.value = refCode; refInput.readOnly = true; }
         const registerBtn = document.getElementById('registerBtn');
         if (registerBtn) {
             registerBtn.style.background = 'linear-gradient(135deg, #d4af37 0%, #b8860b 100%)';
             registerBtn.textContent = '🤝 Registrarse con código de referido';
+        }
+        // Si LLEGÓ por el link (?ref= en esta carga) y no tiene sesión, se abre solo el registro
+        // con el código puesto: quien entra por una invitación viene a crearse la cuenta.
+        if (urlParams.get('ref') && !VIP.state.currentToken) {
+            setTimeout(() => {
+                if (VIP.state.currentToken || VIP.state.currentUser) return;
+                const open = Array.from(document.querySelectorAll('.modal')).find(m => !m.classList.contains('hidden'));
+                if (open && open.id !== 'registerModal') return; // el welcome de publicista u otro modal manda
+                if (VIP.auth && VIP.auth.applyRegisterModalMode) VIP.auth.applyRegisterModalMode();
+                VIP.ui.showModal('registerModal');
+                try { const u = document.getElementById('registerUsername'); if (u) u.focus(); } catch (_) {}
+            }, 500);
         }
     }
 

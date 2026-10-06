@@ -8,6 +8,56 @@
 
 ## Sesión 2026-10-06
 
+### 317. REFERIDOS 2.0 — réplica del sistema #168-#175 del gemelo (JUGAYGANA) adaptada a 1girox
+- Paquete `~/Documents/AUTOREEMBOLSOSjygactivo/docs/replicas/referidos-jugaygana/` (Destino B).
+  Misma idea, pantallas, reglas y endpoints; el netwin se reescribió con 1girox.
+- **Backend:** `referralTierService.js` (nuevo; NON_BANK_SOURCES + los `metadata.source` de
+  regalos de acá: welcome_roulette, daily_roulette, roulette, first_charge_bonus,
+  instant_cashback, welcome_code), `ReferralMilestoneClaim.js` (nuevo, solo historial),
+  `referralController.js` (del paquete: activity #174, detalle con cargas/netwin histórico
+  #175, link por dominio; fallback cargas1girox.com), `referralRoutes.js` (+ /admin/activity).
+  `referralCalculationService.js` NO se reemplazó: (1) la tasa de cada referidor =
+  `referralTierService.resolveReferralRate(referrer).rate` (se graba en
+  ReferralCommission.referralRate); (2) la base YA era el netwin crudo (desde 2026-07-31) — se
+  exporta `getReferredNetwinForRange` (getPlayerStats + mapStatsToRevenue) para el tablero.
+- **Cambios locales conservados / adaptaciones:** el % plano NO pasó a `Config['referralRate']`
+  como en el gemelo: sigue en el comando `/sys_referidos_pct` (#307) — `referralRate.js` suma
+  `set/getGlobalReferralRate` + alias `refreshReferralRateFromCommand`, el server lo relee al
+  arrancar y cada 60 s, y `/api/admin/referral-rate` escribe ese comando. El link del
+  controller pasó de `/linkreferido?ref=` (lazy, #130) a `/?ref=` (también lazy) + ruta
+  `/linkreferido` nueva (antes no existía en el server). `_publicBaseUrlFromRequest` no
+  existe acá → `getPublicBaseUrl()`. Próxima acreditación: "El 1° de <mes>" (pago automático
+  #307), no "primer día hábil".
+- **server.js:** requires, `/linkreferido` (antes del vanity /:code), recarga del % c/60 s,
+  `GET/POST /api/admin/referral-rate`, `GET /api/referrals/dashboard`, `POST
+  /api/referrals/milestones/claim` (410), `GET/POST /api/admin/referrals/milestones-config`,
+  `GET /api/admin/referrals/:userId/netwin` — todo DESPUÉS de authMiddleware.
+  `_referralNetwinMonth` = `getReferredNetwinForRange` (Number|null, cache 15 min,
+  concurrencia 4, tope 60/80, mes ART en curso hasta ahora). `/api/rewards/summary` manda
+  `referralPct` (máximo con niveles), `referralMyPct`, `referralTiersOn`.
+- **Panel (admin-sw v68):** card "🤝 Comisión de referidos" en COMANDOS (antes de Rangos de
+  reembolso), sección Referidos completa del paquete (actividad, ranking, niveles,
+  cálculo/pago, referidores con filtros, detalle con netwin en vivo, pagos, auditoría),
+  `loadReferralRate()` en loadCommands. Tooltips JUGAYGANA → 1girox; "(JG: …)" → "(plataforma: …)".
+- **PWA (SW v192, `?v=317` en auth/ui/app.js):** CSS, hint del registro (`registerReferralHint`),
+  card del home (`#referralHomeCard`, solo dashboard viejo: el cliente en casino no la pide
+  para no gastar cupo de 1girox), popup `#referralPromoModal` (imágenes en `public/img/`),
+  modal nuevo `#referralModal`, bloque de ui.js + exports, hook de app.js (?ref= fijo 30 días
+  + abre el registro solo), hooks de auth.js (código fijo en el registro; popup en los dos
+  caminos de arranque). Modal/popup/chooser con z-index arriba del casino y del hub. La
+  tarjeta de PREMIOS y el banner del asistente dicen "hasta el X%", muestran "Tu % actual"
+  y abren el modal. Texto de compartir = `/sys_referidos_compartir` (#308b).
+- **Copy (#314):** el paquete decía "pérdida neta" en popup, modal, tiles, tabla y chooser →
+  "comisión por la actividad de tus referidos" / "Actividad neta (este mes)".
+- **Probado:** `node --check` en los 13 archivos; HTML del panel y de la PWA balanceados.
+  **Back necesita redeploy.** PENDIENTE de probar en vivo (lista del README del paquete):
+  popup al abrir → Invitar abre el chooser; link `/?ref=CODE` sin sesión → registro con el
+  código fijo; referido carga ≥ $3.000 → sube "activos" y la barra; panel → niveles y % →
+  se reflejan en el cliente; panel → Referidos: actividad, ranking, "Ver referidos" con
+  netwin del mes; preview del cálculo → la tasa de cada referidor = su nivel. ⚠️ Con los
+  niveles ON por default (3/5/10 activos → 1/2/3%), un referidor con < 3 activos cobra el %
+  base (0%) desde el próximo cálculo: confirmar con el owner o apagar los niveles en el panel.
+
 ### 316. "Mi reembolso semanal figura pero no me lo pagaron" (gxsanti2007) + fix "vence en ya mismo"
 - **Caso:** el hub mostraba Semanal $0 "✅ Ya reembolsado ($159.222)". NO era un error
   de pago: es la regla #297 — el cliente reclamó los DIARIOS de esa semana, que ya

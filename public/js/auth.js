@@ -514,7 +514,11 @@ VIP.auth = (function () {
                 if (!_casinoFirst) {
                     VIP.refunds.loadRefundStatus();
                     VIP.fire.loadFireStatus();
+                    // #317 card INVITÁ A TUS AMIGOS: solo en el dashboard viejo (staff / cambio de
+                    // clave). Al cliente en el casino no se le pide: consulta netwin en 1girox.
+                    if (VIP.ui.loadReferralHomeCard) VIP.ui.loadReferralHomeCard();
                 }
+                if (VIP.ui.maybeShowReferralPromo) VIP.ui.maybeShowReferralPromo(); // #317 popup (cooldown 30 min)
 
                 // Entrada por la landing (`ir=casino`): el casino normalmente YA
                 // está abierto (tryAccessLink lo dispara apenas llega el token,
@@ -888,7 +892,9 @@ VIP.auth = (function () {
         if (!_casinoFirstIS) {
             VIP.refunds.loadRefundStatus();
             VIP.fire.loadFireStatus();
+            if (VIP.ui.loadReferralHomeCard) VIP.ui.loadReferralHomeCard();   // #317 card INVITÁ A TUS AMIGOS
         }
+        if (VIP.ui.maybeShowReferralPromo) VIP.ui.maybeShowReferralPromo(); // #317 popup (1× cada 30 min)
         VIP.ui.loadCanalInformativoUrl();
         refreshVerifyPhoneBanner();
         if (VIP.appTest && VIP.appTest.maybeShowAppCheck) VIP.appTest.maybeShowAppCheck();
@@ -1672,11 +1678,20 @@ VIP.auth = (function () {
         const attribution = VIP.campaign && VIP.campaign.getActive();
 
         if (banner) banner.style.display = attribution ? '' : 'none';
-        if (attribution) {
+        // #317 (réplica #168): si vino por link de referido (?ref=), el código queda FIJO y no
+        // editable: un solo invitador por cuenta. Tiene prioridad sobre la atribución de pauta.
+        const lockedRef = window._vipRefLocked || null;
+        const hint = document.getElementById('registerReferralHint');
+        if (lockedRef) {
+            if (referralGroup) referralGroup.style.display = '';
+            if (referralInput) { referralInput.value = lockedRef; referralInput.readOnly = true; referralInput.style.opacity = '.85'; referralInput.style.borderColor = '#d4af37'; }
+            if (hint) { hint.textContent = '🤝 Viniste invitado con este código. Queda vinculado a tu cuenta.'; hint.style.color = '#d4af37'; }
+        } else if (attribution) {
             if (referralGroup) referralGroup.style.display = 'none';
-            if (referralInput) referralInput.value = '';
+            if (referralInput) { referralInput.value = ''; referralInput.readOnly = false; }
         } else {
             if (referralGroup) referralGroup.style.display = '';
+            if (referralInput) referralInput.readOnly = false;
         }
         // Registro con SMS obligatorio en 2 fases: arranca en la fase de envío.
         resetRegisterOtp();

@@ -20,7 +20,10 @@
 const { v4: uuidv4 } = require('uuid');
 const { User, ReferralCommission, ReferralPayout } = require('../models');
 const giroxService = require('./giroxService');
-const { getReferralRateForUser, getConfiguredRate, resolveReferralRate } = require('../utils/referralRate');
+const { getConfiguredRate, resolveReferralRate } = require('../utils/referralRate');
+// #317 (réplica #171): la tasa de CADA referidor sale de los NIVELES por referidos activos
+// (override por usuario > niveles > % plano de /sys_referidos_pct). Nunca getReferralRateForUser.
+const referralTierService = require('./referralTierService');
 const { getPeriodRange } = require('../utils/periodKey');
 const logger = require('../utils/logger');
 
@@ -276,6 +279,24 @@ async function fetchReferredRevenue(referredUser, periodKey, fromDate, toDate) {
 }
 
 /**
+ * #317 — Netwin de UN referido en un rango, con la MISMA lectura y el MISMO mapeo que usa el
+ * cálculo mensual (getPlayerStats + mapStatsToRevenue → mismo alcance casino/total). Lo usan el
+ * tablero del cliente y el admin (GET /api/referrals/dashboard, /api/admin/referrals/:id/netwin)
+ * para que lo que ve el cliente sea exactamente lo que se le paga.
+ * @returns {Promise<number|null>} netwin del rango (positivo = el referido perdió) o null si no
+ *          se pudo leer (1girox caído / sin username).
+ */
+async function getReferredNetwinForRange(referredUser, fromDate, toDate, tag = 'ref-dashboard') {
+  if (!referredUser || !referredUser.username) return null;
+  try {
+    const r = await giroxService.getPlayerStats(referredUser.username, fromDate, toDate, `${tag} ${referredUser.username}`);
+    if (!r || !r.success) return null;
+    const rev = mapStatsToRevenue(r);
+    return Number(rev.totalGgr) || 0;
+  } catch (_) { return null; }
+}
+
+/**
  * Calcular comisiones de referidos para un período
  * @param {string} periodKey - e.g. "2026-04"
  * @param {Object} [options]
@@ -375,7 +396,8 @@ async function calculateCommissionsForPeriod(periodKey, options = {}) {
       continue;
     }
 
-    const referralRate = getReferralRateForUser(referrer);
+    // #317: tasa por nivel (referidos activos). Se graba en ReferralCommission.referralRate.
+    const referralRate = (await referralTierService.resolveReferralRate(referrer)).rate;
 
     // ── Load authoritative settlement state from payout history ──────────────
     // ReferralPayout documents are the source of truth for what was already paid.
@@ -884,5 +906,6 @@ async function getPendingCommissionsSummary(periodKey) {
 
 module.exports = {
   calculateCommissionsForPeriod,
-  getPendingCommissionsSummary
+  getPendingCommissionsSummary,
+  getReferredNetwinForRange
 };

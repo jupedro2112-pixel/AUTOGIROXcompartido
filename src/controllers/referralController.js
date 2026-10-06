@@ -9,19 +9,29 @@ const referralCalculationService = require('../services/referralCalculationServi
 const referralPayoutService = require('../services/referralPayoutService');
 const { getCurrentPeriodKey, getPreviousPeriodKey, getPeriodLabel, getPeriodRange, getNextPeriodLabel } = require('../utils/periodKey');
 const { generateReferralCode } = require('../utils/referralCode');
+const referralTierService = require('../services/referralTierService'); // #171
+const { getGlobalReferralRate } = require('../utils/referralRate'); // #174
 const logger = require('../utils/logger');
 
 // Validate period key format (YYYY-MM)
 const PERIOD_KEY_REGEX = /^\d{4}-\d{2}$/;
 // Allowed status values for payout queries
 const VALID_PAYOUT_STATUSES = ['pending', 'paid', 'failed', 'cancelled'];
-// Dominio de los links de referido que ve el usuario final.
-// GETTER LAZY a propósito (fix 2026-08-05): PUBLIC_BASE_URL llega desde SSM en
-// el bootstrap async — una const acá quedaba clavada en el default viejo
-// (vipcargas.com) aunque la env estuviera bien. Mismo patrón que
-// getPublicBaseUrl() de server.js.
-function referralBaseUrl() {
-  return (process.env.PUBLIC_BASE_URL || 'https://cargas1girox.com').replace(/\/$/, '') + '/linkreferido';
+// Brand domain used for referral links shown to end users
+// #168: el link sale del dominio PROPIO (antes apuntaba a vipcargas.com, el hermano). La PWA
+// lee ?ref= en la raíz; /linkreferido redirige por compatibilidad.
+// Base del link: PUBLIC_BASE_URL si está seteada; si no, el host del request (Render de pruebas
+// → link de Render; EB → el dominio de 1girox). GETTER LAZY: PUBLIC_BASE_URL llega desde SSM
+// en el bootstrap async (fix 2026-08-05 de este repo: una const quedaba en el default).
+function referralBaseUrl(req) {
+  const fromEnv = String(process.env.PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
+  if (fromEnv) return fromEnv + '/';
+  const host = req && req.get && req.get('host');
+  if (host) {
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
+    return `${proto}://${host}/`;
+  }
+  return 'https://cargas1girox.com/';
 }
 
 /**
@@ -90,7 +100,7 @@ const getMyReferralInfo = asyncHandler(async (req, res) => {
   }
 
   const referralLink = user.referralCode
-    ? `${referralBaseUrl()}?ref=${encodeURIComponent(user.referralCode)}`
+    ? `${referralBaseUrl(req)}?ref=${encodeURIComponent(user.referralCode)}`
     : null;
 
   // Contar referidos
@@ -116,6 +126,7 @@ const getMyReferralInfo = asyncHandler(async (req, res) => {
     data: {
       referralCode: user.referralCode,
       referralLink,
+      referralRate: (await referralTierService.resolveReferralRate(user)).rate, // #143/#171: el % real que se le paga (nivel por referidos activos)
       totalReferred,
       activeReferred,
       currentPeriod,
@@ -500,9 +511,30 @@ const adminGetUserReferrals = asyncHandler(async (req, res) => {
   if (!user) throw new AppError('Usuario no encontrado', 404);
 
   // Usuarios referidos por este usuario
-  const referredUsers = await User.find({ referredByUserId: safeUserId })
-    .select('id username referredAt referralStatus excludedFromReferral jugayganaUsername jugayganaUserId')
+  const referredUsersRaw = await User.find({ referredByUserId: safeUserId })
+    .select('id username referredAt createdAt referralStatus excludedFromReferral jugayganaUsername jugayganaUserId isBlocked')
     .lean();
+  // #174: cargas reales por referido (sin regalos) + si califica como "activo" para el nivel.
+  const tierCfg = await referralTierService.getReferralTiersConfig();
+  const depBy = await referralTierService.depositsByReferred(safeUserId);
+  // #175 netwin HISTÓRICO por referido según los cálculos mensuales ya hechos (ReferralCommission).
+  const histAgg = await ReferralCommission.aggregate([
+    { $match: { referrerUserId: safeUserId } },
+    { $group: { _id: '$referredUserId', netwin: { $sum: '$totalOwnerRevenue' }, commission: { $sum: { $add: [{ $ifNull: ['$settledCommissionAmount', 0] }, { $cond: [{ $gt: ['$commissionAmount', 0] }, '$commissionAmount', 0] }] } }, periods: { $sum: 1 }, lastPeriod: { $max: '$periodKey' } } }
+  ]);
+  const histBy = new Map(histAgg.map(h => [h._id, h]));
+  const referredUsers = referredUsersRaw.map(ru => {
+    const d = depBy.get(ru.id);
+    const h = histBy.get(ru.id);
+    return Object.assign({}, ru, {
+      referredAt: ru.referredAt || ru.createdAt,
+      charges: d ? d.count : 0, totalCharged: d ? Math.round(d.total) : 0, lastChargeAt: d ? d.last : null,
+      qualified: !!(d && d.total >= tierCfg.minChargedARS),
+      netwinHist: h ? Math.round(h.netwin) : 0, commissionHist: h ? Math.round(h.commission) : 0, periodsCalculated: h ? h.periods : 0, lastPeriodCalculated: h ? h.lastPeriod : null
+    });
+  }).sort((a, b) => (b.netwinHist - a.netwinHist) || (b.totalCharged - a.totalCharged) || (new Date(b.referredAt || 0) - new Date(a.referredAt || 0)));
+  const activeCount = referredUsers.filter(r => r.qualified).length;
+  const level = await referralTierService.resolveReferralRate(user, { activeCount });
 
   // Comisiones del período (o todas)
   const commissionQuery = { referrerUserId: safeUserId };
@@ -575,12 +607,17 @@ const adminGetUserReferrals = asyncHandler(async (req, res) => {
         id: user.id,
         username: user.username,
         referralCode: user.referralCode,
-        referralLink: user.referralCode ? `${referralBaseUrl()}?ref=${encodeURIComponent(user.referralCode)}` : null,
+        referralLink: user.referralCode ? `${referralBaseUrl(req)}?ref=${encodeURIComponent(user.referralCode)}` : null,
         referralTier: user.referralTier,
         referralRateOverride: user.referralRateOverride,
         excludedFromReferral: user.excludedFromReferral
       },
       referredUsers,
+      // #174 actividad del referidor: activos (≥ mínimo), con carga, nivel actual.
+      activity: { minChargedARS: tierCfg.minChargedARS, active: activeCount, charged: referredUsers.filter(r => r.charges > 0).length,
+        totalCharged: referredUsers.reduce((a, r) => a + r.totalCharged, 0), pct: level.pct, mode: level.mode,
+        netwinHist: referredUsers.reduce((a, r) => a + r.netwinHist, 0), commissionHist: referredUsers.reduce((a, r) => a + r.commissionHist, 0),
+        nextTier: level.nextTier ? { count: level.nextTier.count, pct: level.nextTier.pct, missing: level.missing } : null },
       commissions: enrichedCommissions,
       payouts: payouts.map(p => ({
         ...p,
@@ -851,6 +888,209 @@ const adminGetReferralRelationships = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * GET /api/referrals/admin/activity?months=6
+ * #174 — Actividad y evolución del programa de referidos para el admin: cuántos referidos hay,
+ * cuántos cargaron / son activos (≥ mínimo del nivel), cuántos entraron en los últimos 7 y 30
+ * días contra la ventana anterior, serie diaria de 30 días, tabla por mes y actividad por
+ * referidor. Todo sale de User (referredByUserId) + Transaction deposit reales (sin regalos)
+ * + ReferralCommission/ReferralPayout; NO consulta 1girox (rápido, sin netwin en vivo).
+ * Fechas en día argentino (UTC-3 fijo, mismo criterio que _artDayRange en server.js).
+ */
+const ART_OFFSET_MS = 3 * 60 * 60 * 1000;
+function _artDayKey(d) { return new Date(new Date(d).getTime() - ART_OFFSET_MS).toISOString().slice(0, 10); }
+function _artMonthKey(d) { return _artDayKey(d).slice(0, 7); }
+function _addMonths(key, n) {
+  const [y, m] = key.split('-').map(Number);
+  const t = y * 12 + (m - 1) + n;
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
+}
+function _pctChange(cur, prev) {
+  if (!prev) return cur ? null : 0;
+  return Math.round(((cur - prev) / prev) * 100);
+}
+
+const adminGetReferralActivity = asyncHandler(async (req, res) => {
+  const months = Math.min(24, Math.max(1, parseInt(req.query.months) || 6));
+  const cfg = await referralTierService.getReferralTiersConfig();
+  const minCharged = cfg.minChargedARS;
+  const now = new Date();
+  const todayKey = _artDayKey(now);
+  const thisMonth = _artMonthKey(now);
+  const firstMonth = _addMonths(thisMonth, -(months - 1));
+  // Inicio del rango mensual en UTC (00:00 ART del día 1 del primer mes).
+  const rangeStart = new Date(new Date(firstMonth + '-01T00:00:00Z').getTime() + ART_OFFSET_MS);
+  const dayStart60 = new Date(now.getTime() - 60 * 24 * 3600 * 1000);
+
+  const referred = await User.find({ referredByUserId: { $ne: null, $exists: true } })
+    .select('id username referredByUserId referredAt createdAt isBlocked excludedFromReferral')
+    .lean();
+  const ids = referred.map(r => r.id);
+  const depositMatch = { userId: { $in: ids }, type: 'deposit', status: 'completed', 'metadata.source': { $nin: referralTierService.NON_BANK_SOURCES } };
+
+  const [depByUser, depByMonth, depByDay, commByPeriod, paidByPeriod] = await Promise.all([
+    ids.length ? Transaction.aggregate([
+      { $match: depositMatch },
+      { $group: { _id: '$userId', total: { $sum: '$amount' }, count: { $sum: 1 }, first: { $min: '$timestamp' }, last: { $max: '$timestamp' } } }
+    ]) : [],
+    ids.length ? Transaction.aggregate([
+      { $match: Object.assign({ timestamp: { $gte: rangeStart } }, depositMatch) },
+      { $group: { _id: { $dateToString: { format: '%Y-%m', date: { $subtract: ['$timestamp', ART_OFFSET_MS] } } }, total: { $sum: '$amount' }, count: { $sum: 1 }, users: { $addToSet: '$userId' } } }
+    ]) : [],
+    ids.length ? Transaction.aggregate([
+      { $match: Object.assign({ timestamp: { $gte: dayStart60 } }, depositMatch) },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: { $subtract: ['$timestamp', ART_OFFSET_MS] } } }, total: { $sum: '$amount' }, count: { $sum: 1 }, users: { $addToSet: '$userId' } } }
+    ]) : [],
+    ReferralCommission.aggregate([
+      { $match: { periodKey: { $gte: firstMonth } } },
+      { $group: { _id: '$periodKey', commission: { $sum: { $add: [{ $ifNull: ['$settledCommissionAmount', 0] }, { $cond: [{ $gt: ['$commissionAmount', 0] }, '$commissionAmount', 0] }] } },
+        withNetwin: { $sum: { $cond: [{ $gt: ['$totalOwnerRevenue', 0] }, 1, 0] } }, referrers: { $addToSet: '$referrerUserId' }, rows: { $sum: 1 } } }
+    ]),
+    ReferralPayout.aggregate([
+      { $match: { status: 'paid', periodKey: { $gte: firstMonth } } },
+      { $group: { _id: '$periodKey', paid: { $sum: '$totalCommissionAmount' }, count: { $sum: 1 } } }
+    ])
+  ]);
+
+  const depMap = new Map(depByUser.map(d => [d._id, { total: Number(d.total) || 0, count: d.count, first: d.first, last: d.last }]));
+  const monthDep = new Map(depByMonth.map(m => [m._id, { total: Number(m.total) || 0, count: m.count, users: (m.users || []).length }]));
+  const dayDep = new Map(depByDay.map(d => [d._id, { total: Number(d.total) || 0, count: d.count, users: (d.users || []).length }]));
+  const commMap = new Map(commByPeriod.map(c => [c._id, c]));
+  const paidMap = new Map(paidByPeriod.map(p => [p._id, p]));
+
+  // ── Totales ──
+  let charged = 0, active = 0, blocked = 0, totalCharged = 0;
+  for (const r of referred) {
+    const d = depMap.get(r.id);
+    if (r.isBlocked) blocked++;
+    if (d) { charged++; totalCharged += d.total; if (d.total >= minCharged) active++; }
+  }
+
+  // ── Ventanas 7 / 30 días (por día ART) ──
+  const dayKeys = [];
+  for (let i = 59; i >= 0; i--) dayKeys.push(_artDayKey(new Date(now.getTime() - i * 24 * 3600 * 1000)));
+  const newByDay = new Map(), firstByDay = new Map();
+  for (const r of referred) {
+    const k = _artDayKey(r.referredAt || r.createdAt);
+    newByDay.set(k, (newByDay.get(k) || 0) + 1);
+    const d = depMap.get(r.id);
+    if (d && d.first) { const fk = _artDayKey(d.first); firstByDay.set(fk, (firstByDay.get(fk) || 0) + 1); }
+  }
+  const sumWindow = (map, keys, field) => keys.reduce((a, k) => { const v = map.get(k); return a + (v == null ? 0 : (field ? (v[field] || 0) : v)); }, 0);
+  const win = (n) => {
+    const cur = dayKeys.slice(60 - n), prev = dayKeys.slice(60 - 2 * n, 60 - n);
+    const mk = (keys) => ({ newReferred: sumWindow(newByDay, keys), firstDeposits: sumWindow(firstByDay, keys), depositors: null, depositTotal: sumWindow(dayDep, keys, 'total'), depositCount: sumWindow(dayDep, keys, 'count') });
+    const c = mk(cur), p = mk(prev);
+    return { days: n, current: c, previous: p, change: { newReferred: _pctChange(c.newReferred, p.newReferred), firstDeposits: _pctChange(c.firstDeposits, p.firstDeposits), depositTotal: _pctChange(c.depositTotal, p.depositTotal) } };
+  };
+  const windows = { last7: win(7), last30: win(30) };
+  const daily = dayKeys.slice(30).map(k => ({ day: k, newReferred: newByDay.get(k) || 0, firstDeposits: firstByDay.get(k) || 0, depositTotal: (dayDep.get(k) || {}).total || 0, depositors: (dayDep.get(k) || {}).users || 0 }));
+
+  // ── Veredicto: mejora / estable / baja (nuevos + primeras cargas, 30 vs 30 anteriores) ──
+  const w = windows.last30;
+  const score = (x) => x.newReferred + 2 * x.firstDeposits;
+  const sc = score(w.current), sp = score(w.previous);
+  let trend = 'flat';
+  if (sc === 0 && sp === 0) trend = 'none';
+  else if (sp === 0 || sc >= sp * 1.15) trend = 'up';
+  else if (sc <= sp * 0.85) trend = 'down';
+
+  // ── Por referidor ──
+  const byReferrer = new Map();
+  const firstReferralByReferrer = new Map();
+  const cut30 = now.getTime() - 30 * 24 * 3600 * 1000;
+  for (const r of referred) {
+    const rid = r.referredByUserId;
+    let s = byReferrer.get(rid);
+    if (!s) { s = { referred: 0, charged: 0, active: 0, new30: 0, totalCharged: 0, lastReferredAt: null, lastChargeAt: null }; byReferrer.set(rid, s); }
+    const at = r.referredAt || r.createdAt;
+    const atMs = at ? new Date(at).getTime() : 0;
+    s.referred++;
+    if (atMs >= cut30) s.new30++;
+    if (!s.lastReferredAt || atMs > new Date(s.lastReferredAt).getTime()) s.lastReferredAt = at;
+    const fr = firstReferralByReferrer.get(rid);
+    if (!fr || atMs < fr) firstReferralByReferrer.set(rid, atMs);
+    const d = depMap.get(r.id);
+    if (d) {
+      s.charged++; s.totalCharged += d.total;
+      if (d.total >= minCharged) s.active++;
+      if (d.last && (!s.lastChargeAt || new Date(d.last) > new Date(s.lastChargeAt))) s.lastChargeAt = d.last;
+    }
+  }
+  const referrerIds = Array.from(byReferrer.keys());
+  const referrerDocs = referrerIds.length ? await User.find({ id: { $in: referrerIds } }).select('id username referralRateOverride excludedFromReferral').lean() : [];
+  // #175 ranking: netwin y comisión históricos (todos los cálculos) + del período en curso si ya se calculó.
+  const histByReferrer = new Map((await ReferralCommission.aggregate([
+    { $match: { referrerUserId: { $in: referrerIds } } },
+    { $group: { _id: '$referrerUserId', netwin: { $sum: '$totalOwnerRevenue' },
+      commission: { $sum: { $add: [{ $ifNull: ['$settledCommissionAmount', 0] }, { $cond: [{ $gt: ['$commissionAmount', 0] }, '$commissionAmount', 0] }] } },
+      netwinCurrent: { $sum: { $cond: [{ $eq: ['$periodKey', thisMonth] }, '$totalOwnerRevenue', 0] } },
+      withNetwin: { $sum: { $cond: [{ $gt: ['$totalOwnerRevenue', 0] }, 1, 0] } } } }
+  ])).map(h => [h._id, h]));
+  const referrerDoc = new Map(referrerDocs.map(u => [u.id, u]));
+  const referrers = [];
+  for (const [rid, s] of byReferrer) {
+    const u = referrerDoc.get(rid);
+    let pct = null, mode = 'tiers';
+    if (u && typeof u.referralRateOverride === 'number') { pct = Math.round(u.referralRateOverride * 10000) / 100; mode = 'override'; }
+    else if (cfg.enabled) { pct = referralTierService.levelForCount(cfg, s.active).pct; }
+    else { pct = Math.round(getGlobalReferralRate() * 10000) / 100; mode = 'flat'; }
+    const lv = cfg.enabled ? referralTierService.levelForCount(cfg, s.active) : null;
+    const h = histByReferrer.get(rid);
+    referrers.push(Object.assign({ id: rid, username: u ? u.username : '(no encontrado)', excluded: !!(u && u.excludedFromReferral), pct, mode,
+      nextTier: lv && lv.nextTier ? { count: lv.nextTier.count, pct: lv.nextTier.pct, missing: lv.missing } : null,
+      netwinHist: h ? Math.round(h.netwin) : 0, commissionHist: h ? Math.round(h.commission) : 0, netwinCurrent: h ? Math.round(h.netwinCurrent) : 0, referredWithNetwin: h ? h.withNetwin : 0 }, s));
+  }
+  referrers.sort((a, b) => (b.active - a.active) || (b.charged - a.charged) || (b.referred - a.referred));
+  const movers = referrers.filter(r => r.new30 > 0).sort((a, b) => b.new30 - a.new30).slice(0, 10)
+    .map(r => ({ id: r.id, username: r.username, new30: r.new30, active: r.active, referred: r.referred }));
+  const levelDist = { none: 0 };
+  for (const t of cfg.tiers) levelDist[String(t.count)] = 0;
+  for (const r of referrers) {
+    if (r.mode !== 'tiers') continue;
+    const lv = referralTierService.levelForCount(cfg, r.active);
+    if (lv.tier) levelDist[String(lv.tier.count)]++; else levelDist.none++;
+  }
+
+  // ── Por mes ──
+  const newReferrersByMonth = new Map();
+  for (const [, ms] of firstReferralByReferrer) { const k = _artMonthKey(new Date(ms)); newReferrersByMonth.set(k, (newReferrersByMonth.get(k) || 0) + 1); }
+  const newByMonth = new Map(), firstByMonth = new Map();
+  for (const r of referred) {
+    const k = _artMonthKey(r.referredAt || r.createdAt);
+    newByMonth.set(k, (newByMonth.get(k) || 0) + 1);
+    const d = depMap.get(r.id);
+    if (d && d.first) { const fk = _artMonthKey(d.first); firstByMonth.set(fk, (firstByMonth.get(fk) || 0) + 1); }
+  }
+  const monthly = [];
+  for (let i = 0; i < months; i++) {
+    const k = _addMonths(firstMonth, i);
+    const md = monthDep.get(k) || { total: 0, count: 0, users: 0 };
+    const c = commMap.get(k), p = paidMap.get(k);
+    monthly.push({
+      month: k, label: getPeriodLabel(k), current: k === thisMonth,
+      newReferred: newByMonth.get(k) || 0, newReferrers: newReferrersByMonth.get(k) || 0, firstDeposits: firstByMonth.get(k) || 0,
+      depositors: md.users, depositTotal: Math.round(md.total), depositCount: md.count,
+      withNetwin: c ? c.withNetwin : 0, commissionTotal: c ? Math.round(c.commission) : 0, referrersWithCommission: c ? (c.referrers || []).length : 0,
+      calculated: !!c, paidTotal: p ? Math.round(p.paid) : 0, payouts: p ? p.count : 0
+    });
+  }
+  for (let i = 0; i < monthly.length; i++) {
+    const prev = i > 0 ? monthly[i - 1] : null;
+    monthly[i].change = prev ? { newReferred: _pctChange(monthly[i].newReferred, prev.newReferred), firstDeposits: _pctChange(monthly[i].firstDeposits, prev.firstDeposits), depositTotal: _pctChange(monthly[i].depositTotal, prev.depositTotal) } : null;
+  }
+
+  res.json({
+    status: 'success',
+    data: {
+      generatedAt: now, today: todayKey, minChargedARS: minCharged, tiersEnabled: cfg.enabled, tiers: cfg.tiers,
+      totals: { referred: referred.length, referrers: referrerIds.length, charged, active, noCharge: referred.length - charged, blocked, totalCharged: Math.round(totalCharged),
+        referrersWithActive: referrers.filter(r => r.active > 0).length, referrersAtLevel: referrers.filter(r => r.mode === 'tiers' && r.pct > 0).length, levelDist },
+      windows, daily, trend, monthly, referrers, movers
+    }
+  });
+});
+
 module.exports = {
   getMyReferralInfo,
   getMyReferralSummary,
@@ -862,5 +1102,6 @@ module.exports = {
   adminCalculate,
   adminPreview,
   adminPayout,
-  adminGetReferralRelationships
+  adminGetReferralRelationships,
+  adminGetReferralActivity
 };

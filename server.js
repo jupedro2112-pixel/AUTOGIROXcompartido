@@ -76,6 +76,11 @@ const PendingPayout = require('./src/models/PendingPayout');
 const hgcashPay = require('./src/services/hgcashService');
 const pdfImage = require('./src/services/pdfImageService');
 const { generateReferralCode } = require('./src/utils/referralCode');
+// #317 réplica referidos (#168-#175 del gemelo AUTOREEMBOLSOS), adaptada a 1girox.
+const ReferralMilestoneClaim = require('./src/models/ReferralMilestoneClaim'); // solo historial (premios en plata discontinuados)
+const _periodKey = require('./src/utils/periodKey');
+const { setGlobalReferralRate, getGlobalReferralRate, refreshReferralRateFromCommand, REFERRAL_PCT_COMMAND } = require('./src/utils/referralRate');
+const referralTiers = require('./src/services/referralTierService'); // niveles de % por referidos activos
 const { setRedisClient, getRedisClient } = require('./src/utils/redisClient');
 const { generateAndSendOTP, verifyOTP } = require('./src/services/otpService');
 const { sendSMS } = require('./src/services/smsService');
@@ -722,6 +727,11 @@ async function _runMonthlyReferralPayout() {
 }
 const referralCalculationService = require('./src/services/referralCalculationService');
 const referralPayoutService = require('./src/services/referralPayoutService');
+// #317 (réplica #169): % PLANO de referidos en memoria. Fuente = comando /sys_referidos_pct
+// (#307); se relee al arrancar y cada 60 s para que un cambio en COMANDOS (o en la card del
+// panel) llegue a TODAS las instancias. Si falla, queda el último valor / env / 3%.
+setTimeout(() => { refreshReferralRateFromCommand().catch(() => {}); }, 10 * 1000);
+setInterval(() => { refreshReferralRateFromCommand().catch(() => {}); }, 60 * 1000);
 setTimeout(() => { _runMonthlyReferralPayout().catch((e) => logger.warn(`[referidos] cron mensual falló: ${e.message}`)); }, 5 * 60 * 1000); // 5 min tras el arranque
 setInterval(() => { _runMonthlyReferralPayout().catch((e) => logger.warn(`[referidos] cron mensual falló: ${e.message}`)); }, 60 * 60 * 1000); // cada hora (solo hace algo si falta el mes anterior)
 
@@ -1486,6 +1496,14 @@ async function _getActiveCampaignsCached() {
   _campaignSlugCache = { at: Date.now(), items };
   return items;
 }
+
+// #317 (réplica #168): link de referido /linkreferido?ref=CODE → /?ref=CODE (la PWA lee
+// ?ref= en la raíz). Cubre los links viejos que se compartieron con /linkreferido.
+// Se registra ANTES del vanity /:code para que no la capture.
+app.get('/linkreferido', (req, res) => {
+  const ref = String(req.query.ref || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12).toUpperCase();
+  res.redirect(302, '/?ref=' + encodeURIComponent(ref));
+});
 
 // Página de ESTADÍSTICAS del publicista (solo lectura). Se registra ANTES del
 // vanity /:code para que no la capture. La página lee ?c=CODE&t=TOKEN y pega al
@@ -13263,7 +13281,15 @@ app.get('/api/rewards/summary', authMiddleware, async (req, res) => {
       const _dm = await User.findOne({ id: userId }).select('depositMode').lean();
       out.depositMode = (_dm && _dm.depositMode) || null;
       // #308: % de comisión de referidos vigente (comando /sys_referidos_pct) para el hub.
-      try { out.referralPct = Math.round((await require('./src/utils/referralRate').resolveReferralRate()) * 1000) / 10; } catch (e) { out.referralPct = 3; }
+      // #317: con NIVELES el copy dice "hasta el X%" (máximo alcanzable) y aparte el % propio;
+      // todo sale de referralTierService.resolveReferralRate (override > niveles > plano).
+      try {
+        const _refU = await User.findOne({ id: userId }).select('id referralRateOverride').lean();
+        const _lv = await referralTiers.resolveReferralRate(_refU || { id: userId });
+        out.referralPct = _lv.mode === 'tiers' ? _lv.maxPct : _lv.pct;
+        out.referralMyPct = _lv.pct;
+        out.referralTiersOn = _lv.mode === 'tiers';
+      } catch (e) { out.referralPct = 3; out.referralMyPct = null; out.referralTiersOn = false; }
       // #308b: plantilla del mensaje de WhatsApp (COMANDOS /sys_referidos_compartir);
       // el front reemplaza {link}/{codigo} con los datos de /api/referrals/me.
       try {
@@ -19415,6 +19441,210 @@ app.get('/api/admin/users/export/csv', authMiddleware, async (req, res) => {
 
 const referralRoutes = require('./src/routes/referralRoutes');
 app.use('/api/referrals', referralRoutes);
+
+// ============================================
+// #317 REFERIDOS 2.0 — réplica de #168-#175 del gemelo AUTOREEMBOLSOS (JUGAYGANA), con el
+// netwin leído de 1girox. Tablero vivo del cliente, NIVELES de % por referidos activos,
+// % plano editable, netwin en vivo por referido para el admin.
+// ⚠️ TDZ: rutas DESPUÉS de authMiddleware/adminMiddleware/sensitiveLimiter.
+// Regla del owner (gemelo 2026-09-29): NADA de premios en plata por cantidad de referidos
+// (se estafaban con cuentas falsas): el premio es el % de comisión por nivel.
+// ============================================
+
+// % PLANO (admin general). Acá la fuente es el comando /sys_referidos_pct (#307): la card
+// del panel escribe ESE comando, así no hay dos lugares para el mismo número.
+app.get('/api/admin/referral-rate', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const rate = await refreshReferralRateFromCommand();
+    res.json({ rate, percent: Math.round(rate * 1000) / 10, command: REFERRAL_PCT_COMMAND });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/referral-rate', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const pct = Number(req.body && req.body.percent);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 50) return res.status(400).json({ error: 'El porcentaje tiene que ser un número mayor a 0 y hasta 50' });
+    const rounded = Math.round(pct * 10) / 10;
+    await Command.updateOne({ name: REFERRAL_PCT_COMMAND },
+      { $set: { response: String(rounded), isActive: true } }, { upsert: true });
+    setGlobalReferralRate(rounded / 100);
+    logger.info(`[referrals] % plano de comisión cambiado a ${rounded}% por ${req.user.username} (${REFERRAL_PCT_COMMAND})`);
+    res.json({ rate: rounded / 100, percent: rounded, command: REFERRAL_PCT_COMMAND });
+  } catch (e) { logger.warn(`[referrals] referral-rate POST: ${e.message}`); res.status(500).json({ error: 'Error del servidor' }); }
+});
+
+async function getReferralMilestonesConfig() { return referralTiers.getReferralTiersConfig(); }
+// NETWIN del MES por referido. ⚠️ MISMA función que el cálculo mensual (con la que se PAGA):
+// referralCalculationService.getReferredNetwinForRange → giroxService.getPlayerStats +
+// mapStatsToRevenue (mismo alcance casino/total). Contrato: Number (≥ o < 0) o null si no se
+// pudo leer. Cache 15 min por usuario (además del cache corto de stats de giroxService).
+const _refNetwinCache = new Map(); // key userId → { at, ggr }
+const REF_NETWIN_TTL_MS = 15 * 60 * 1000;
+async function _referralNetwinMonth(u, range) {
+  const hit = _refNetwinCache.get(u.id);
+  if (hit && Date.now() - hit.at < REF_NETWIN_TTL_MS) return hit.ggr;
+  let ggr = null;
+  try { ggr = await referralCalculationService.getReferredNetwinForRange(u, range.from, range.to, 'ref-dashboard'); } catch (_) { ggr = null; }
+  if (ggr !== null) _refNetwinCache.set(u.id, { at: Date.now(), ggr });
+  return ggr;
+}
+setInterval(() => { const now = Date.now(); for (const [k, v] of _refNetwinCache) if (now - v.at > REF_NETWIN_TTL_MS * 2) _refNetwinCache.delete(k); }, 10 * 60 * 1000).unref();
+// Mes argentino EN CURSO: 00:00 ART del día 1 → ahora (getPeriodRange ancla a -03:00).
+function _referralMonthRange() {
+  const { fromDate } = _periodKey.getPeriodRange(_periodKey.getCurrentPeriodKey());
+  return { from: fromDate, to: new Date() };
+}
+// Netwin del mes de varios referidos: concurrencia 4, tope `max`.
+async function _referralNetwinFor(list, max) {
+  const range = _referralMonthRange();
+  const pick = list.slice(0, max);
+  const netBy = new Map();
+  for (let i = 0; i < pick.length; i += 4) {
+    const chunk = pick.slice(i, i + 4);
+    const vals = await Promise.all(chunk.map(u => _referralNetwinMonth(u, range)));
+    chunk.forEach((u, k) => netBy.set(u.id, vals[k]));
+  }
+  return { netBy, picked: pick.length };
+}
+
+function _referralLinkFor(code) {
+  return getPublicBaseUrl().replace(/\/$/, '') + '/?ref=' + encodeURIComponent(code);
+}
+async function _ensureReferralCode(user) {
+  if (user.referralCode) return user.referralCode;
+  for (let i = 0; i < 10; i++) {
+    const cand = generateReferralCode();
+    if (await User.findOne({ referralCode: cand }).select('_id').lean()) continue;
+    const upd = await User.findOneAndUpdate({ id: user.id, referralCode: null }, { $set: { referralCode: cand } }, { new: true }).lean();
+    if (upd && upd.referralCode) return upd.referralCode;
+    const re = await User.findOne({ id: user.id }).select('referralCode').lean();
+    if (re && re.referralCode) return re.referralCode;
+  }
+  return null;
+}
+
+// Tablero del referidor: link, totales, tabla por referido y NIVEL de comisión.
+app.get('/api/referrals/dashboard', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findOne({ id: req.user.userId }).lean();
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    const code = await _ensureReferralCode(user);
+    const cfg = await getReferralMilestonesConfig();
+    const refs = await User.find({ referredByUserId: user.id }).sort({ createdAt: -1 }).select('id username createdAt isBlocked').lean();
+    const depBy = await referralTiers.depositsByReferred(user.id);
+    const activeCount = Array.from(depBy.values()).filter(v => v.total >= cfg.minChargedARS).length;
+    const lv = await referralTiers.resolveReferralRate(user, { activeCount });
+    const rate = lv.rate;
+    // NETWIN del mes solo para los que cargaron (los demás no tienen juego). Tope 60.
+    const { netBy } = await _referralNetwinFor(refs.filter(r => depBy.has(r.id)), 60);
+    const rows = refs.map(r => {
+      const d = depBy.get(r.id);
+      const total = d ? d.total : 0;
+      const net = netBy.has(r.id) ? netBy.get(r.id) : (d ? null : 0);
+      const netPos = net === null ? null : Math.max(0, net);
+      return {
+        username: r.username, registeredAt: r.createdAt, blocked: !!r.isBlocked,
+        charges: d ? d.count : 0, totalCharged: total, lastChargeAt: d ? d.last : null,
+        active: !!d, qualified: total >= cfg.minChargedARS && !!d,
+        netLossMonth: net, commissionMonth: netPos === null ? null : Math.round(netPos * rate)
+      };
+    });
+    const sumNet = rows.reduce((a, r) => a + (r.netLossMonth === null ? 0 : Math.max(0, r.netLossMonth)), 0);
+    const periodKey = _periodKey.getCurrentPeriodKey();
+    // Total histórico acreditado por comisiones (+ premios viejos si los hubo).
+    const credited = await Transaction.aggregate([
+      { $match: { userId: user.id, status: 'completed', $or: [{ type: 'referral_commission' }, { type: 'bonus', 'metadata.source': 'referral_milestone' }] } },
+      { $group: { _id: '$type', total: { $sum: '$amount' } } }
+    ]);
+    const hist = {}; for (const c of credited) hist[c._id] = c.total;
+    const tiers = cfg.tiers.map(t => ({ count: t.count, pct: t.pct, reached: activeCount >= t.count, current: !!(lv.tier && lv.tier.count === t.count) }));
+    res.json({
+      success: true,
+      referralCode: code, referralLink: code ? _referralLinkFor(code) : null, rate,
+      // #307: acá el pago es AUTOMÁTICO el día 1 de cada mes.
+      period: { key: periodKey, label: _periodKey.getPeriodLabel(periodKey), nextCredit: `El 1° de ${_periodKey.getNextPeriodLabel(periodKey)}` },
+      totals: { referred: rows.length, active: rows.filter(r => r.active).length, qualified: activeCount, totalCharged: rows.reduce((a, r) => a + r.totalCharged, 0),
+        netLossMonth: Math.round(sumNet), commissionMonth: Math.round(sumNet * rate), netwinPartial: rows.some(r => r.active && r.netLossMonth === null),
+        historicalCommission: Math.round(hist.referral_commission || 0), historicalMilestones: Math.round(hist.bonus || 0) },
+      referrals: rows,
+      level: { enabled: cfg.enabled, mode: lv.mode, minChargedARS: cfg.minChargedARS, basePct: cfg.basePct, active: activeCount, pct: lv.pct, maxPct: lv.maxPct,
+        tiers, currentTier: lv.tier ? { count: lv.tier.count, pct: lv.tier.pct } : null, nextTier: lv.nextTier ? { count: lv.nextTier.count, pct: lv.nextTier.pct, missing: lv.missing } : null,
+        maxCount: cfg.tiers.length ? cfg.tiers[cfg.tiers.length - 1].count : 0 }
+    });
+  } catch (error) {
+    logger.error(`[referrals] dashboard: ${error.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// Premios en plata por hitos: DISCONTINUADOS (estafables). Cerrado para apps viejas cacheadas.
+app.post('/api/referrals/milestones/claim', authMiddleware, sensitiveLimiter, async (req, res) => {
+  res.status(410).json({ error: 'Los premios en plata por referidos se reemplazaron por niveles de comisión: cuantos más referidos activos, más % cobrás. Actualizá la app.' });
+});
+
+// Config de niveles de comisión por referidos activos (admin general).
+app.get('/api/admin/referrals/milestones-config', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const cfg = await referralTiers.getReferralTiersConfig({ force: true });
+    res.json(Object.assign({}, cfg, { flatPct: Math.round(getGlobalReferralRate() * 10000) / 100 }));
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/referrals/milestones-config', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const b = req.body || {};
+    const rawTiers = Array.isArray(b.tiers) ? b.tiers : [];
+    for (const t of rawTiers) {
+      const pct = Number(t && t.pct);
+      if (!(Number.isFinite(pct) && pct > 0 && pct <= 50)) return res.status(400).json({ error: 'Cada nivel necesita un % entre 0,01 y 50' });
+    }
+    const tiers = referralTiers.normalizeTiers(rawTiers);
+    if (!tiers.length) return res.status(400).json({ error: 'Cargá al menos un nivel (cantidad de referidos activos + %)' });
+    const counts = rawTiers.map(t => Math.round(Number(t.count) || 0)).filter(c => c > 0);
+    if (new Set(counts).size !== counts.length) return res.status(400).json({ error: 'Hay una cantidad de referidos repetida' });
+    for (let i = 1; i < tiers.length; i++) if (tiers[i].pct < tiers[i - 1].pct) return res.status(400).json({ error: 'El % tiene que subir (o mantenerse) con más referidos' });
+    const basePct = Number(b.basePct);
+    if (!(Number.isFinite(basePct) && basePct >= 0 && basePct <= 50)) return res.status(400).json({ error: '% base inválido (0 a 50)' });
+    if (basePct > tiers[0].pct) return res.status(400).json({ error: 'El % base no puede superar al del primer nivel' });
+    const next = { enabled: b.enabled !== false, minChargedARS: Math.max(0, Math.round(Number(b.minChargedARS) || 0)), basePct: Math.round(basePct * 100) / 100, tiers, updatedBy: req.user.username, updatedAt: new Date() };
+    await setConfig('referralMilestones', next);
+    referralTiers.invalidateCache();
+    logger.info(`[referrals] niveles de comisión actualizados por ${req.user.username}: base ${next.basePct}% · ${tiers.map(t => t.count + '→' + t.pct + '%').join(', ')} · activo = cargó ≥ $${next.minChargedARS} · ${next.enabled ? 'ON' : 'OFF'}`);
+    res.json(Object.assign({}, await referralTiers.getReferralTiersConfig({ force: true }), { flatPct: Math.round(getGlobalReferralRate() * 10000) / 100 }));
+  } catch (e) { logger.warn(`[referrals] milestones-config POST: ${e.message}`); res.status(500).json({ error: 'Error del servidor' }); }
+});
+
+// Netwin del MES EN VIVO de cada referido de un referidor (admin). Misma fuente y cache que el
+// tablero del cliente. Solo referidos con cargas reales; concurrencia 4, tope 80. Va separado
+// del detalle (referralController.adminGetUserReferrals) para que el detalle cargue al instante.
+app.get('/api/admin/referrals/:userId/netwin', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const referrer = await User.findOne({ id: String(req.params.userId || '') }).lean();
+    if (!referrer) return res.status(404).json({ error: 'Referidor no encontrado' });
+    const cfg = await getReferralMilestonesConfig();
+    const refs = await User.find({ referredByUserId: referrer.id }).select('id username').lean();
+    const depBy = await referralTiers.depositsByReferred(referrer.id);
+    const activeCount = Array.from(depBy.values()).filter(v => v.total >= cfg.minChargedARS).length;
+    const lv = await referralTiers.resolveReferralRate(referrer, { activeCount });
+    const withDeposits = refs.filter(r => depBy.has(r.id));
+    const { netBy, picked } = await _referralNetwinFor(withDeposits, 80);
+    const rows = refs.map(r => {
+      const has = depBy.has(r.id);
+      const net = netBy.has(r.id) ? netBy.get(r.id) : (has ? null : 0); // null = no se pudo leer
+      return { userId: r.id, username: r.username, netwinMonth: net, commissionMonth: net === null ? null : Math.round(Math.max(0, net) * lv.rate) };
+    });
+    const sumNet = rows.reduce((a, r) => a + (r.netwinMonth === null ? 0 : Math.max(0, r.netwinMonth)), 0);
+    res.json({ success: true, period: { key: _periodKey.getCurrentPeriodKey(), label: _periodKey.getPeriodLabel(_periodKey.getCurrentPeriodKey()) },
+      rate: lv.rate, pct: lv.pct, mode: lv.mode, active: activeCount,
+      totals: { netwinMonth: Math.round(sumNet), commissionMonth: Math.round(sumNet * lv.rate), partial: rows.some(r => r.netwinMonth === null), skipped: Math.max(0, withDeposits.length - picked) },
+      referrals: rows });
+  } catch (e) {
+    logger.warn(`[referrals] admin netwin ${req.params.userId}: ${e.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
 
 // ============================================================================
 // RULETA DIARIA — 1 giro/día por user con PWA + notifs. Auto-credit JUGAYGANA.

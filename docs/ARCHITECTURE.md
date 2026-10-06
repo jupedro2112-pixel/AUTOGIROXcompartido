@@ -5,7 +5,9 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-06** — status de reembolsos devuelve `alreadyPaid`
+> Última actualización: **2026-10-06** — REFERIDOS 2.0 (#317, réplica #168-#175 del gemelo):
+> niveles de % por referidos activos, tablero en vivo, actividad/ranking del admin (§2, §4.6,
+> §5, §8, §9). Antes ese mismo día: status de reembolsos devuelve `alreadyPaid`
 > (plata cobrada en diarios/semanales, #316, §5).
 > Antes: 2026-10-02 — desvío de altas nuevas a otra campaña
 > (`Campaign.newSignupsTo`, #315: §2 Campaign, §5 publisher_admin).
@@ -168,7 +170,12 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   publisherAnalyticsService).
 - **Referral**: ReferralEvent (atribución, 1 por referido), ReferralCommission
   (cálculo por período `YYYY-MM`, con liquidación INCREMENTAL/delta —
-  `settledOwnerRevenue`), ReferralPayout (pagos, soporta múltiples por período).
+  `settledOwnerRevenue`; `referralRate` = la tasa del NIVEL usada ese mes),
+  ReferralPayout (pagos, soporta múltiples por período), **ReferralMilestoneClaim**
+  (#317: solo historial de los premios en plata por hitos del gemelo — discontinuados,
+  `POST /api/referrals/milestones/claim` → 410). Config: `referralMilestones` =
+  `{enabled, minChargedARS, basePct, tiers:[{count,pct}]}` (niveles, default 3→1% /
+  5→2% / 10→3%, activo = cargas reales acumuladas ≥ $3.000).
 
 ### Notificaciones / retención
 - **NotificationRule** (+ Suggestion con approval-gate 48h, + NotificationHistory con
@@ -498,11 +505,17 @@ salen de la MISMA Partner API, con la misma `X-Api-Key` y por **username**:
   el manual): se trata igual — sin stats.
 
 **La comisión de referidos no viene del proveedor:** 1girox devuelve todos los campos
-`commission` en 0, así que la tasa es NUESTRA. Desde #307 es **3% del netwin del
-referido, directo** (comando `/sys_referidos_pct` en COMANDOS → env
-`GIROX_REFERRAL_COMMISSION_PCT` → default 3; `referralRate.resolveReferralRate()`).
-Los `referralRateOverride` por usuario siguen mandando. No reintroducir la tasa
-encadenada (8% × 7%).
+`commission` en 0, así que la tasa es NUESTRA y se aplica UNA vez sobre el netwin del
+referido. Desde #317 el % de cada referidor sale de
+**`referralTierService.resolveReferralRate(user)`** (async): override por usuario
+(`referralRateOverride`) > **niveles** por referidos ACTIVOS (`Config['referralMilestones']`,
+si `enabled`) > **% plano** (comando `/sys_referidos_pct` → env
+`GIROX_REFERRAL_COMMISSION_PCT` → 3%; en memoria vía `refreshReferralRateFromCommand`, se
+relee al arrancar y cada 60 s). "Activo" = cargas reales acumuladas (`Transaction deposit`,
+`metadata.source` fuera de `NON_BANK_SOURCES`) ≥ `minChargedARS`. No reintroducir la tasa
+encadenada (8% × 7%). El netwin mensual por referido lo lee
+`referralCalculationService.getReferredNetwinForRange` (getPlayerStats + mapStatsToRevenue,
+mismo alcance que el cálculo) — lo usan el cálculo, el tablero del cliente y el admin.
 
 **`giroxUserId`** — el propio `stats` devuelve el ID numérico del jugador y los flujos
 lo persisten "gratis" (update condicional sólo si estaba vacío). Ya NO bloquea nada:
@@ -812,10 +825,30 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 - **Referidos**: preview/calculate (delta incremental sobre ledger de payouts) /
   payout (acredita con `giroxService.creditUserBalance`, `ignoreGlobalRollover:true`,
   reference `vip-refcom-<payoutId>` reusando el documento de intentos fallidos).
-  Comisión = **3% del netwin de casino del referido** (`/sys_referidos_pct`, #307).
+  Comisión = **% del nivel × netwin de casino del referido** (§4.6, #317).
   **Pago AUTOMÁTICO el día 1** (`_runMonthlyReferralPayout`, reserva
   `Config referral_autorun_<YYYY-MM>`, `adminUsername:'auto-referidos'`); los botones
   del panel siguen para casos puntuales. Ver §4.6.
+  **Referidos 2.0 (#317, réplica #168-#175 del gemelo):**
+  - Cliente: `GET /api/referrals/dashboard` (link, totales, tabla por referido con el
+    netwin del MES en vivo — mes ART en curso, cache 15 min por usuario, concurrencia 4,
+    tope 60 — y el nivel/próximo nivel). PWA: modal `#referralModal` + popup
+    `#referralPromoModal` (1× cada 30 min, `?refpromo=1` lo fuerza) + chooser de compartir
+    (WhatsApp / Telegram / share nativo / copiar; texto = `/sys_referidos_compartir`).
+    Ambos con z-index 2147483000 (arriba del casino y del hub). La tarjeta "Invitá y ganá"
+    de PREMIOS y el banner del asistente abren ese modal; `/api/rewards/summary` manda
+    `referralPct` (máximo si hay niveles), `referralMyPct` y `referralTiersOn`.
+  - Link: `PUBLIC_BASE_URL/?ref=CODE` (`/linkreferido?ref=` redirige, para links viejos).
+    `app.js` guarda el código 30 días (`localStorage vip_ref`), lo deja FIJO en el
+    registro (`window._vipRefLocked`, prioridad sobre la pauta) y, si llegó por el link
+    sin sesión, abre el registro solo.
+  - Admin: `GET /api/referrals/admin/activity?months=N` (actividad, ventanas 7/30 d,
+    serie diaria, mes a mes, por referidor — NO consulta 1girox), detalle del referidor
+    con cargas y netwin histórico + `GET /api/admin/referrals/:userId/netwin` (netwin del
+    mes en vivo, tope 80). `GET/POST /api/admin/referrals/milestones-config` (niveles) y
+    `GET/POST /api/admin/referral-rate` (% plano → escribe `/sys_referidos_pct`), solo
+    admin general. Panel: sección Referidos (actividad, ranking, niveles, cálculo/pago,
+    referidores, detalle, pagos, auditoría) + card "🤝 Comisión de referidos" en COMANDOS.
 - **Ruleta diaria** (v2, ver "Hub PREMIOS" arriba): gates configurables en
   `Config['dailyRoulette']` (cargas mínimas en los últimos `depositDays` días, default
   7 — #306; app instalada), cooldown de 24 h desde el último giro. Pick ponderado +
@@ -980,8 +1013,10 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   panel); con `opts.bonus:true` la frase se agrega sola si el comando no la tiene
   (`{rollover_off}` la evita). `applyRolloverVars()` para los mensajes armados a mano.
 - **Copy de referidos al cliente** (#314): hablar de "comisión del X% por la actividad
-  de tus referidos", NUNCA "de lo que pierdan" (decisión del owner: queda chocante). El
-  % en JS sale de `VIP.ui._rwRefPct()`; en HTML estático NO poner número (se desactualiza).
+  de tus referidos", NUNCA "de lo que pierdan" / "pérdida neta" (decisión del owner:
+  queda chocante; el paquete del gemelo lo decía y se adaptó en #317). El % en JS sale de
+  `VIP.ui._rwRefPct()` / `_rwRefPctTxt()` ("hasta el X%" con niveles) o del dashboard; en
+  HTML estático NO poner número (se desactualiza).
 - **Identidad**: `user.id` (uuid), no `_id`. Username case-insensitive →
   `findUserByUsernameCI` (indexado + fallback), NUNCA regex nuevo.
 - **periodKey**: `YYYY-MM` (referidos y VipWagerMonth); RefundClaim usa
@@ -1006,6 +1041,14 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
 
 - **DOS `connectDB`**: el real es `config/database.js`; el de `src/models/index.js` NO
   se usa. No definir schemas en config/database.js.
+- **Referidos (#317)**: DOS funciones con nombre parecido — `referralTierService.
+  resolveReferralRate(user)` (la que PAGA: override > niveles > plano) y
+  `utils/referralRate.resolveReferralRate()` (= `refreshReferralRateFromCommand`, solo relee
+  el % plano del comando). Para plata o copy, SIEMPRE la del servicio de niveles. El
+  `/api/referrals/dashboard` consulta 1girox por referido con cargas (cache 15 min, tope 60):
+  no llamarlo en el arranque del cliente en modo casino (solo el popup cada 30 min / el
+  modal). `/api/referrals/admin/activity` NO consulta 1girox. Nada de premios en plata por
+  cantidad de referidos.
 - **Secrets por SSM**: no leer `process.env.X` al require; lazy getters. Los módulos
   `girox*` ya siguen ese patrón (getters + cliente HTTP on-demand); los 4 clientes
   viejos congelaban `process.env` en consts de módulo — no copiar ese patrón.

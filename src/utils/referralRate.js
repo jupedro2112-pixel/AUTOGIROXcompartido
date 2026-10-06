@@ -76,10 +76,28 @@ async function resolveReferralRate() {
   return getConfiguredRate();
 }
 
+/**
+ * #317 (réplica #169 del gemelo): tasa GLOBAL plana en memoria. Acá la fuente sigue
+ * siendo el comando /sys_referidos_pct (#307) — server.js la relee al arrancar y cada
+ * 60 s (`refreshReferralRateFromCommand`) y el endpoint /api/admin/referral-rate la
+ * escribe en el comando y la fija con `setGlobalReferralRate`. null = env/default.
+ * ⚠️ Esta es la tasa PLANA: la que se PAGA sale de
+ * referralTierService.resolveReferralRate(user) (override > niveles > plana).
+ */
+function setGlobalReferralRate(rate) {
+  const n = Number(rate);
+  _cmdRate = (rate != null && Number.isFinite(n) && n > 0 && n <= 1) ? n : null;
+}
+function getGlobalReferralRate() { return getConfiguredRate(); }
+
 module.exports = {
   DEFAULT_REFERRAL_RATE,
   REFERRAL_PCT_COMMAND,
   getConfiguredRate,
   getReferralRateForUser,
-  resolveReferralRate
+  resolveReferralRate,
+  // #317: alias con nombre claro (no confundir con referralTierService.resolveReferralRate(user))
+  refreshReferralRateFromCommand: resolveReferralRate,
+  setGlobalReferralRate,
+  getGlobalReferralRate
 };
