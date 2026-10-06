@@ -8,6 +8,13 @@
 
 ## Sesión 2026-10-06
 
+### 321. Texto de los SMS de código: marca 1GIROX, sin dominio (pedido de salida del sandbox SNS)
+- Owner va a pedir a AWS salir del sandbox de SMS (cuenta zamuxavier, sa-east-1) y el ejemplo
+  de mensaje tiene que coincidir con lo real. `otpService.buildOtpMessage`: antes "VIPCARGAS:
+  codigo … vipcargas .com" (marca/dominio viejos, pendiente desde #151) → "Tu codigo 1GIROX es
+  123456. Vence en 5 minutos. No lo compartas con nadie." (reset/cambio de clave: "…para
+  cambiar tu clave es…"). Sin tildes (GSM-7, 1 SMS). Back necesita redeploy.
+
 ### 320. Cuenta hgcash (token + secreto del webhook) cargable desde el PANEL
 - Owner: hoy cambiar de cuenta hgcash (se cae una, cambia el titular) obliga a entrar a AWS
   SSM; que lo pueda hacer un encargado desde el panel, rápido.

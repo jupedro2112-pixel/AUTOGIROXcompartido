@@ -36,22 +36,13 @@ function generateCode() {
  * @returns {string} Texto del SMS listo para enviar
  */
 function buildOtpMessage(purpose, code) {
-  // El espacio en "vipcargas .com" es intencional: rompe la detección de URL
-  // que usan los filtros antispam de los carriers LATAM (sobre todo Tigo/Claro
-  // en Paraguay y Argentina), evitando que el SMS caiga en spam. El usuario
-  // sigue entendiendo el dominio sin problema. Sigue siendo 1 SMS (GSM-7,
-  // ~80 chars, muy por debajo del límite de 160).
-  if (purpose === 'register') {
-    return `VIPCARGAS: codigo de verificacion ${code}. Valido 5 min. vipcargas .com`;
-  } else if (purpose === 'reset') {
-    return `VIPCARGAS: codigo para restablecer contrasena ${code}. Valido 5 min. vipcargas .com`;
-  } else if (purpose === 'change-password') {
-    return `VIPCARGAS: codigo para cambiar contrasena ${code}. Valido 5 min. vipcargas .com`;
-  } else if (purpose === 'login') {
-    return `VIPCARGAS: codigo de inicio de sesion ${code}. Valido 5 min. vipcargas .com`;
-  } else {
-    return `VIPCARGAS: codigo de verificacion ${code}. Valido 5 min. vipcargas .com`;
+  // #321 (owner 2026-10-06): marca 1GIROX y SIN dominio (antes "VIPCARGAS ... vipcargas .com",
+  // marca y dominio viejos). Es el ejemplo que se mandó a AWS para salir del sandbox de SMS:
+  // si se cambia, que siga coincidiendo. Sin tildes a propósito (GSM-7 → 1 solo SMS, < 160).
+  if (purpose === 'reset' || purpose === 'change-password') {
+    return `Tu codigo 1GIROX para cambiar tu clave es ${code}. Vence en 5 minutos. No lo compartas con nadie.`;
   }
+  return `Tu codigo 1GIROX es ${code}. Vence en 5 minutos. No lo compartas con nadie.`;
 }
 
 /**
