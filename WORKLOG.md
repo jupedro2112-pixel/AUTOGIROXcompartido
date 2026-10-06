@@ -9,17 +9,17 @@
 ## Sesión 2026-10-06
 
 ### 327. Landing multi-sitio: elige el backend por dominio o por `?s=CLAVE` (un solo proyecto de Vercel)
-- Owner: con el clon (`autogirox.com`) la landing de Vercel seguía pegándole a
+- Owner: con el clon (`rapidogirox.com`; primero iba a ser autogirox.com) la landing de Vercel seguía pegándole a
   `1giroxauto.com` ("Código de pauta inválido o inactivo" para una campaña creada en el
   clon). Preguntó si se puede sumar otro backend al MISMO proyecto de Vercel.
 - `landing/index.html`: tabla `SITES` (clave → `{api, bonusBig, bonusSub}`: `original` =
-  1giroxauto.com / 100%, `autogirox` = autogirox.com / 50%), `HOST_TO_SITE` (dominio de la
+  1giroxauto.com / 100%, `rapidogirox` = rapidogirox.com / 50%), `HOST_TO_SITE` (dominio de la
   landing → sitio, para tener varios dominios en el mismo proyecto: Vercel → Settings →
   Domains) y `DEFAULT_SITE`. Orden: dominio > `?s=CLAVE` > default. Solo se puede elegir
   entre los sitios de la lista (no se puede mandar a un backend ajeno desde el link).
   `?api=` queda SOLO para pruebas. La marca "ya tenés cuenta" (`localStorage`) es por sitio
   (`girox_signed_<clave>`; el default conserva `girox_signed`).
-- Uso: link del publicista del clon = `https://<landing>/?p=CODIGO&s=autogirox`, o un
+- Uso: link del publicista del clon = `https://<landing>/?p=CODIGO&s=rapidogirox`, o un
   dominio propio mapeado en `HOST_TO_SITE` y el link queda `https://<dominio>/?p=CODIGO`.
 - ⚠️ El backend del sitio tiene que tener certificado válido en su dominio: el fetch de la
   landing desde otro origen no puede aceptar certificados inválidos (la URL
@@ -107,7 +107,7 @@
 ### 323. CASO ASENTADO: entorno EB clonado `AUTOGIROXcompartidoo` (502 al arrancar + login bloqueado por CORS)
 - Owner clonó el entorno `PAUTANUEVAsantino-env` (cuenta zamuxavier, sa-east-1) como
   `AUTOGIROXcompartidoo` (misma aplicación EB, mismo `SSM_PATH=/pautanuevasantino/prod/`,
-  dominio previsto autogirox.com) y le desplegó este repo. Sin cambios de código; dos trampas
+  dominio previsto rapidogirox.com — primero iba a ser autogirox.com) y le desplegó este repo. Sin cambios de código; dos trampas
   de infra, diagnosticadas con los logs del entorno:
 - **(1) 100% de 5xx / "Severe" tras el deploy:** el clon nace con un grupo de seguridad NUEVO
   para sus instancias y el Redis (`clon-redis`) solo aceptaba 6379 desde el grupo del entorno

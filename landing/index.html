@@ -11,7 +11,7 @@
   → se le MUESTRAN usuario y clave → entra logueado al chat/casino.
 
   CONFIGURAR (constantes abajo del script):
-    SITES          → un backend + su oferta por cada sitio (original, autogirox…)
+    SITES          → un backend + su oferta por cada sitio (original, rapidogirox…)
     HOST_TO_SITE   → qué sitio usa cada dominio de la landing (varios dominios en
                      el MISMO proyecto de Vercel); o ?s=CLAVE en el link
     CAMPAIGN_CODE  → código de campaña fijo, o vacío para tomarlo de la URL
@@ -221,18 +221,18 @@
   // oferta). El sitio se elige, en este orden:
   //   1) por el DOMINIO desde el que se abre la landing (HOST_TO_SITE) — para
   //      tener varios dominios en el MISMO proyecto de Vercel (Settings → Domains);
-  //   2) por el parámetro ?s=CLAVE del link (ej. ?p=CODIGO&s=autogirox);
+  //   2) por el parámetro ?s=CLAVE del link (ej. ?p=CODIGO&s=rapidogirox);
   //   3) si no, el sitio DEFAULT_SITE.
   // Solo se puede elegir entre los sitios de esta lista: nadie puede mandar la
   // landing a un backend ajeno desde el link.
   var SITES = {
     original: { api: 'https://1giroxauto.com', bonusBig: '100%', bonusSub: 'EN TU PRIMERA CARGA' },
-    autogirox: { api: 'https://autogirox.com', bonusBig: '50%', bonusSub: 'EN TU PRIMERA CARGA' }
+    rapidogirox: { api: 'https://rapidogirox.com', bonusBig: '50%', bonusSub: 'EN TU PRIMERA CARGA' }
   };
   var DEFAULT_SITE = 'original';
   var HOST_TO_SITE = {                               // dominio de la landing → sitio
     'grupogirox.com': 'original', 'www.grupogirox.com': 'original'
-    // 'landing.autogirox.com': 'autogirox'
+    // 'landing.rapidogirox.com': 'rapidogirox'
   };
   var CAMPAIGN_CODE = '';                            // fijo, o vacío = tomar de la URL
   // ====================
