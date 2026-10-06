@@ -5,7 +5,8 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-06** — interruptores de SMS y registro (#322: §3, §5, §6,
+> Última actualización: **2026-10-06** — trampas del entorno EB clonado (#323, §9).
+> Antes ese mismo día: interruptores de SMS y registro (#322: §3, §5, §6,
 > §9; SMS y auto-registro APAGADOS por default, se prenden desde el panel). De paso se
 > corrigieron datos stale (§4.8 default de referidos, §5 ruteo por key del dueño, §6 admin-sw).
 > Antes ese mismo día: REFERIDOS 2.0 (#317, réplica #168-#175 del gemelo):
@@ -1087,6 +1088,14 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `html.sms-off` / `html.signup-off` (CSS en el `<head>` de index.html); `VIP.ui.showModal`
   bloquea los modales de registro/SMS. El default apagado aplica a CUALQUIER entorno cuya
   base no tenga el Config guardado.
+- **Entorno nuevo / clonado en EB (#323)**: (a) el server escucha recién DESPUÉS de SSM →
+  Mongo → Redis; si el Redis no es alcanzable (grupo de seguridad sin la regla 6379 para las
+  instancias nuevas) `setupRedisAdapter` reintenta para siempre y todo da 502 sin crashear.
+  (b) `ALLOWED_ORIGINS` se compara EXACTO contra el header `Origin`: minúsculas, con
+  `https://`, sin barra final; si no coincide, hasta el login del propio panel da 500. El warn
+  "ALLOWED_ORIGINS no configurado" del arranque es falsa alarma cuando viene de SSM (se
+  evalúa antes de cargar SSM). (c) Lo que está en SSM pisa las propiedades del entorno salvo
+  `SSM_SKIP_KEYS`; dos entornos con el mismo `SSM_PATH` comparten todo lo que no se saltee.
 - **DOS `connectDB`**: el real es `config/database.js`; el de `src/models/index.js` NO
   se usa. No definir schemas en config/database.js.
 - **Referidos (#317)**: DOS funciones con nombre parecido — `referralTierService.

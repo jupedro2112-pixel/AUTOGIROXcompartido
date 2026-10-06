@@ -8,6 +8,39 @@
 
 ## Sesión 2026-10-06
 
+### 323. CASO ASENTADO: entorno EB clonado `AUTOGIROXcompartidoo` (502 al arrancar + login bloqueado por CORS)
+- Owner clonó el entorno `PAUTANUEVAsantino-env` (cuenta zamuxavier, sa-east-1) como
+  `AUTOGIROXcompartidoo` (misma aplicación EB, mismo `SSM_PATH=/pautanuevasantino/prod/`,
+  dominio previsto autogirox.com) y le desplegó este repo. Sin cambios de código; dos trampas
+  de infra, diagnosticadas con los logs del entorno:
+- **(1) 100% de 5xx / "Severe" tras el deploy:** el clon nace con un grupo de seguridad NUEVO
+  para sus instancias y el Redis (`clon-redis`) solo aceptaba 6379 desde el grupo del entorno
+  original. `setupRedisAdapter` hace `await connect()` y node-redis reintenta para siempre
+  (`Redis pub client error: Connection timeout` cada 7 s) → `server.listen` nunca corre →
+  nginx devuelve 502. Se resolvió agregando la regla 6379 con origen el grupo del clon (etapa
+  `sg` de `aws-bootstrap-clone.sh`). Cambiar `/0` por `/1` en `REDIS_URL` NO sirve: es la
+  base lógica dentro del mismo servidor. Alternativa sin Redis: `SSM_SKIP_KEYS=REDIS_URL` +
+  1 sola instancia.
+- **(2) Login del panel "Algo salió mal" (`POST /api/auth/login` → 500):** log `CORS
+  bloqueado para origen: https://autogiroxcompartidoo.eba-…`. `ALLOWED_ORIGINS` tenía el
+  dominio de EB con MAYÚSCULAS (`https://AUTOGIROXcompartidoo…`); el navegador manda el
+  `Origin` en minúsculas y la comparación es exacta (misma trampa que #154). Se resolvió
+  pasando el valor a minúsculas + reinicio. ⚠️ El warn de arranque "ALLOWED_ORIGINS no
+  configurado en producción" es FALSA ALARMA cuando la variable viene de SSM: se evalúa al
+  cargar el módulo, antes del bootstrap de SSM.
+- **Estado del clon:** base de Mongo NUEVA y vacía (el arranque creó el admin y el CBU por
+  defecto) → es un sitio separado del original. Sigue leyendo del path de SSM compartido la
+  key de 1girox, las keys de consultas y los pixels de Meta de los publicistas (Ok2026,
+  PWAUTO, santino). Revisar antes de mandarle clientes.
+- ⚠️ **Path de SSM compartido entre los dos entornos:** lo que se edite ahí para el clon
+  (hoy: `ALLOWED_ORIGINS`, versión 4) lo va a leer el ORIGINAL en su próximo reinicio. Si la
+  lista quedó sin los dominios del original, se le rompe el login por CORS. Salida:
+  `SSM_SKIP_KEYS=…` en el clon con sus valores como propiedades de entorno (#190), o un path
+  propio.
+- **Pendiente ofrecido (no pedido):** comparar orígenes sin distinguir mayúsculas, aceptar
+  siempre el mismo dominio que sirve la página, mover el warn engañoso a después de SSM, y
+  un timeout al conectar Redis para que el arranque no quede colgado.
+
 ### 322. SMS y auto-registro APAGADOS por default, con interruptores en el panel (cuenta de AWS sin SNS)
 - Owner: "voy a subir este proyecto en otro Amazon que no tengo SNS/SMS habilitado; sacamos esa
   parte y deshabilitamos el auto-registro, que no haya forma de registrarse momentáneamente, y
