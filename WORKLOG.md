@@ -4,7 +4,22 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-06**
+> **Última actualización: 2026-10-07**
+
+## Sesión 2026-10-07
+
+### 331. Empujón "📲 Instalá la app" después de cada carga acreditada
+- Owner: quiere más visibilidad e incentivo para agregar la app al inicio (hoy solo estaba en
+  PREMIOS); eligió el empujón post-carga con el texto "instalá la app para reclamar tu ruleta
+  diaria del día y los reembolsos diario, semanal y mensual", llamativo.
+- `casinoBotDepositConfirmed` (ui.js): si la app NO está instalada (display-mode standalone /
+  navigator.standalone), el cartel "¡Carga acreditada!" suma un bloque dorado "📲 ¡INSTALÁ LA
+  APP Y RECLAMÁ TUS PREMIOS!" (ruleta diaria de hoy + reembolsos diario/semanal/mensual) con
+  botón "INSTALAR LA APP AHORA" → cierra el cartel y abre la guía de instalación existente
+  (`_rwShowInstallGuide`: 1 toque en Android, pasos en iPhone). El cartel dura 14 s (antes 8)
+  cuando lleva el empujón. El mismo mensaje + botón quedan en el hilo del asistente (el cartel
+  se va solo; el hilo no). Con la app instalada no aparece nada. SW v199, `ui.js?v=331`. Solo
+  front.
 
 ## Sesión 2026-10-06
 

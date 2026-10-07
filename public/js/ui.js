@@ -4320,6 +4320,21 @@ VIP.ui.casinoBotDepositConfirmed = function(newBalance, info) {
         (rollTxt ? '<div style="color:#ffe9a6;font-size:12px;margin-top:3px;">' + rollTxt + '</div>' : '') +
       '</div>';
   }
+  // #331 (owner 2026-10-07): empujón para INSTALAR LA APP justo después de la
+  // carga (momento de más entusiasmo). Solo si no la tiene instalada. La ruleta
+  // diaria y los reembolsos exigen la app (#301): ese es el gancho.
+  const _installed = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  const installHtml = _installed ? '' :
+    '<div style="background:linear-gradient(135deg,rgba(255,215,0,0.16),rgba(124,58,237,0.22));border:1.5px solid #ffd700;border-radius:14px;' +
+      'padding:11px 10px;margin:0 0 12px;box-shadow:0 0 18px rgba(255,215,0,0.25);">' +
+      '<div style="color:#ffd700;font-weight:900;font-size:15px;letter-spacing:0.3px;">📲 ¡INSTALÁ LA APP Y RECLAMÁ TUS PREMIOS!</div>' +
+      '<div style="color:#fff;font-size:12.5px;line-height:1.45;margin:5px 0 8px;">' +
+        'Con la app instalada reclamás tu <b style="color:#26e07f;">🎰 RULETA DIARIA de hoy</b> y tus ' +
+        '<b style="color:#4dd0ff;">💸 REEMBOLSOS diario, semanal y mensual</b> de lo que pierdas.</div>' +
+      '<button type="button" onclick="VIP.ui._hideCasinoDepositToast();VIP.ui._rwShowInstallGuide()" ' +
+        'style="width:100%;background:#ffd700;color:#2a1a00;border:none;border-radius:12px;padding:11px;' +
+        'font-size:14px;font-weight:900;cursor:pointer;">📲 INSTALAR LA APP AHORA</button>' +
+    '</div>';
   ov.innerHTML =
     '<div style="width:min(90vw,360px);background:linear-gradient(155deg,#0d3b23,#0a2e1b);' +
     'border:2px solid #25d366;border-radius:22px;padding:26px 22px;text-align:center;' +
@@ -4327,15 +4342,17 @@ VIP.ui.casinoBotDepositConfirmed = function(newBalance, info) {
       '<div style="font-size:52px;line-height:1;">✅</div>' +
       '<div style="color:#25d366;font-weight:900;font-size:24px;margin:8px 0 2px;">¡Carga acreditada!</div>' +
       '<div style="color:#cfe9d8;font-size:14px;">Tu saldo ahora es</div>' +
-      '<div style="color:#fff;font-weight:900;font-size:34px;margin:4px 0 ' + (bonusHtml ? '10px' : '16px') + ';">$' + amt + '</div>' +
+      '<div style="color:#fff;font-weight:900;font-size:34px;margin:4px 0 ' + (bonusHtml || installHtml ? '10px' : '16px') + ';">$' + amt + '</div>' +
       bonusHtml +
+      installHtml +
       '<button type="button" onclick="VIP.ui._hideCasinoDepositToast()" ' +
         'style="width:100%;background:#25d366;color:#04310f;border:none;border-radius:14px;padding:14px;' +
         'font-size:16px;font-weight:900;cursor:pointer;">🎰 ¡A JUGAR!</button>' +
     '</div>';
   ov.style.display = 'flex';
   clearTimeout(VIP.ui._depositToastTimer);
-  VIP.ui._depositToastTimer = setTimeout(VIP.ui._hideCasinoDepositToast, 8000);
+  // Con el empujón de la app el cartel dura más (hay más para leer).
+  VIP.ui._depositToastTimer = setTimeout(VIP.ui._hideCasinoDepositToast, installHtml ? 14000 : 8000);
 
   // Confirmación también en el hilo del asistente (si no está en soporte).
   const drawer = document.getElementById('casinoChatDrawer');
@@ -4345,6 +4362,13 @@ VIP.ui.casinoBotDepositConfirmed = function(newBalance, info) {
   VIP.ui._botMsg('💰 <b>¡Carga acreditada!</b> Tu saldo ahora es <b>$' + amt + '</b> 🎰' +
     (bAmt > 0 ? '<br>🎁 Incluye $' + bAmt.toLocaleString('es-AR') + ' de bono' +
       (info && info.rolloverX > 0 ? ' · 🎯 ROLLOVER x' + Number(info.rolloverX) : (info && info.rolloverX === 0 ? ' · sin rollover' : '')) : ''));
+  // #331: el mismo empujón queda en el hilo (el cartel se va solo; esto no).
+  if (installHtml) {
+    VIP.ui._botMsg('📲 <b style="color:#ffd700;">¡INSTALÁ LA APP Y RECLAMÁ TUS PREMIOS!</b><br>' +
+      'Con la app instalada reclamás tu <b>🎰 RULETA DIARIA de hoy</b> y tus <b>💸 REEMBOLSOS diario, semanal y mensual</b> de lo que pierdas. ' +
+      'Es un toque y queda en tu pantalla de inicio.');
+    VIP.ui._botRow(VIP.ui._botBtn('📲 Instalar la app ahora', 'VIP.ui._rwShowInstallGuide()', true));
+  }
 };
 
 VIP.ui._hideCasinoDepositToast = function() {
