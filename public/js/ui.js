@@ -4330,7 +4330,7 @@ VIP.ui.casinoBotDepositConfirmed = function(newBalance, info) {
       '<div style="color:#ffd700;font-weight:900;font-size:15px;letter-spacing:0.3px;">📲 ¡INSTALÁ LA APP Y RECLAMÁ TUS PREMIOS!</div>' +
       '<div style="color:#fff;font-size:12.5px;line-height:1.45;margin:5px 0 8px;">' +
         'Con la app instalada reclamás tu <b style="color:#26e07f;">🎰 RULETA DIARIA de hoy</b> y tus ' +
-        '<b style="color:#4dd0ff;">💸 REEMBOLSOS diario, semanal y mensual</b> de lo que pierdas.</div>' +
+        '<b style="color:#4dd0ff;">💸 REEMBOLSOS diario, semanal y mensual</b> de tu NETWIN.</div>' +
       '<button type="button" onclick="VIP.ui._hideCasinoDepositToast();VIP.ui._rwShowInstallGuide()" ' +
         'style="width:100%;background:#ffd700;color:#2a1a00;border:none;border-radius:12px;padding:11px;' +
         'font-size:14px;font-weight:900;cursor:pointer;">📲 INSTALAR LA APP AHORA</button>' +
@@ -4365,7 +4365,7 @@ VIP.ui.casinoBotDepositConfirmed = function(newBalance, info) {
   // #331: el mismo empujón queda en el hilo (el cartel se va solo; esto no).
   if (installHtml) {
     VIP.ui._botMsg('📲 <b style="color:#ffd700;">¡INSTALÁ LA APP Y RECLAMÁ TUS PREMIOS!</b><br>' +
-      'Con la app instalada reclamás tu <b>🎰 RULETA DIARIA de hoy</b> y tus <b>💸 REEMBOLSOS diario, semanal y mensual</b> de lo que pierdas. ' +
+      'Con la app instalada reclamás tu <b>🎰 RULETA DIARIA de hoy</b> y tus <b>💸 REEMBOLSOS diario, semanal y mensual</b> de tu NETWIN. ' +
       'Es un toque y queda en tu pantalla de inicio.');
     VIP.ui._botRow(VIP.ui._botBtn('📲 Instalar la app ahora', 'VIP.ui._rwShowInstallGuide()', true));
   }

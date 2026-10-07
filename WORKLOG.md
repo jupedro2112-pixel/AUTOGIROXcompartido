@@ -18,8 +18,9 @@
   botón "INSTALAR LA APP AHORA" → cierra el cartel y abre la guía de instalación existente
   (`_rwShowInstallGuide`: 1 toque en Android, pasos en iPhone). El cartel dura 14 s (antes 8)
   cuando lleva el empujón. El mismo mensaje + botón quedan en el hilo del asistente (el cartel
-  se va solo; el hilo no). Con la app instalada no aparece nada. SW v199, `ui.js?v=331`. Solo
-  front.
+  se va solo; el hilo no). Con la app instalada no aparece nada. Texto: "… reembolsos diario,
+  semanal y mensual de tu NETWIN" (owner: no decir "de lo que pierdas"; misma regla que el
+  copy de referidos #314). SW v200, `ui.js?v=331b`. Solo front.
 
 ## Sesión 2026-10-06
 
