@@ -1028,6 +1028,69 @@ document.addEventListener('change', function (ev) {
                                 </div>
                             </div>
                         </div>
+                        <!-- #332 GH WALLET: banco con API PARALELO a hgcash (solo admin general) -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="ghwalletHeader">
+                            <h3>🏦 GH Wallet (banco automático paralelo)</h3>
+                        </div>
+                        <div class="cbu-form" id="ghwalletForm">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                Segundo banco con API, independiente de hgcash. Las transferencias que entran por GH Wallet
+                                llegan por su propio webhook y se cargan con el <b>mismo matcheo por comprobante</b> (coelsa / nombre),
+                                recién cuando GH Wallet las da por <b>firmes</b> (<code>payment.verified</code>, 1-2 min). Los dos bancos
+                                pueden estar <b>activos a la vez</b>; cada uno con su interruptor y su modo. Los <b>retiros</b> salen por el
+                                banco que elijas acá abajo.
+                            </p>
+                            <div style="margin-bottom:14px;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;">
+                                <div style="font-weight:bold;font-size:13px;margin-bottom:6px;">💸 ¿Por qué banco salen los RETIROS?</div>
+                                <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
+                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;"><input type="radio" name="bankProvider" value="hgcash" style="width:auto;"> hgcash</label>
+                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;"><input type="radio" name="bankProvider" value="ghwallet" style="width:auto;"> GH Wallet</label>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="saveBankProvider()">💾 Guardar banco de retiros</button>
+                                    <span id="bankProviderMsg" style="font-size:12px;color:#aaa;"></span>
+                                </div>
+                                <small style="color:#aaa;font-size:11px;display:block;margin-top:6px;">GH Wallet paga solo a CBU/CVU de 22 dígitos (no resuelve alias) y su clave real necesita el permiso de retiros que habilita la administración de GH Wallet.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Modo:</label>
+                                <select id="ghwalletMode" style="width:100%;">
+                                    <option value="shadow">Sombra (detecta y avisa, NO carga)</option>
+                                    <option value="auto">Automático (carga sola)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input type="checkbox" id="ghwalletEnabled" style="width:auto;"> Activar GH Wallet (apagado = sus avisos se guardan pero no se carga nada)
+                                </label>
+                            </div>
+                            <button type="button" class="btn-primary" onclick="saveGhwalletConfig()">💾 Guardar GH Wallet</button>
+                            <span id="ghwalletCfgMsg" style="font-size:12px;color:#aaa;margin-left:8px;"></span>
+
+                            <div id="ghwalletCredBox" style="margin-top:18px;padding:14px;border:1px solid rgba(100,181,246,0.45);border-radius:10px;background:rgba(100,181,246,0.05);">
+                                <h4 style="margin:0 0 6px;color:#64b5f6;font-size:14px;">🔐 Cuenta GH Wallet conectada (token y secreto)</h4>
+                                <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                    En GH Wallet → Herramientas → API: creá la clave (<code>gw_live_…</code>, o <code>gw_test_…</code> para probar sin plata),
+                                    configurá la <b>dirección de avisos</b> con la URL de abajo y generá la <b>clave para firmar los avisos</b>. Pegá las dos acá.
+                                    Se guardan cifradas y mandan sobre AWS (SSM). El token se prueba contra GH Wallet antes de guardar.
+                                </p>
+                                <div id="ghwalletCredStatus" style="font-size:12px;color:#ccc;margin-bottom:10px;line-height:1.6;">Cargando…</div>
+                                <div class="form-group">
+                                    <label>Token de API (gw_live_… / gw_test_…):</label>
+                                    <input type="password" id="ghwalletCredToken" placeholder="(dejar vacío para no cambiarlo)" autocomplete="off" style="width:100%;">
+                                </div>
+                                <div class="form-group">
+                                    <label>Secreto del webhook (whsec_…):</label>
+                                    <input type="password" id="ghwalletCredSecret" placeholder="(dejar vacío para no cambiarlo)" autocomplete="off" style="width:100%;">
+                                    <small style="color:#aaa;font-size:11px;">Dirección de avisos (webhook URL) a cargar en GH Wallet: <code id="ghwalletCredWebhookUrl">…</code></small>
+                                </div>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                    <button class="btn-primary" onclick="saveGhwalletCredentials()">🔐 Probar y guardar</button>
+                                    <button class="btn btn-secondary btn-sm" onclick="clearGhwalletCredentials()" title="Borra lo cargado acá y vuelve a usar el token/secreto de AWS (SSM)">↩️ Volver a usar AWS (SSM)</button>
+                                    <span id="ghwalletCredMsg" style="font-size:12px;color:#aaa;"></span>
+                                </div>
+                                <div id="ghwalletAccountBox" style="margin-top:12px;font-size:12px;color:#ccc;line-height:1.6;"></div>
+                            </div>
+                        </div>
+
                         <!-- Movimientos del banco automático (hgcash) -->
                         <div id="hgcashMovementsPanel">
                             <div class="panel-subheader" style="margin-top: 24px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">

@@ -6424,6 +6424,129 @@ async function clearHgcashFanout() {
 }
 window.loadHgcashFanout = loadHgcashFanout; window.saveHgcashFanout = saveHgcashFanout; window.clearHgcashFanout = clearHgcashFanout;
 
+// ====== #332 GH WALLET (banco paralelo) ======
+async function loadGhwalletCard() {
+    const form = document.getElementById('ghwalletForm');
+    const header = document.getElementById('ghwalletHeader');
+    try {
+        const r = await authFetch('/api/admin/ghwallet/config');
+        if (!r.ok) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; return; }
+        if (form) form.style.display = '';
+        if (header) header.style.display = '';
+        const j = await r.json();
+        const en = document.getElementById('ghwalletEnabled'); if (en) en.checked = j.enabled === true;
+        const md = document.getElementById('ghwalletMode'); if (md) md.value = j.mode === 'auto' ? 'auto' : 'shadow';
+        const u = document.getElementById('ghwalletCredWebhookUrl'); if (u) u.textContent = j.webhookFullUrl || '';
+        loadBankProvider();
+        loadGhwalletCredentials();
+    } catch (_) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
+}
+async function saveGhwalletConfig() {
+    const m = document.getElementById('ghwalletCfgMsg');
+    const enabled = document.getElementById('ghwalletEnabled').checked;
+    const mode = document.getElementById('ghwalletMode').value;
+    if (enabled && mode === 'auto' && !confirm('GH Wallet en modo AUTOMÁTICO: las transferencias verificadas que matcheen con un comprobante se cargan solas. ¿Confirmás?')) return;
+    try {
+        const r = await authFetch('/api/admin/ghwallet/config', { method: 'POST', body: JSON.stringify({ enabled, mode }) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } return; }
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado: ' + (j.enabled ? 'ACTIVO' : 'apagado') + ' · modo ' + (j.mode === 'auto' ? 'automático' : 'sombra'); }
+        showToast('GH Wallet guardado', 'success');
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+async function loadBankProvider() {
+    try {
+        const r = await authFetch('/api/admin/bank-provider');
+        if (!r.ok) return;
+        const j = await r.json();
+        const el = document.querySelector('input[name="bankProvider"][value="' + j.provider + '"]'); if (el) el.checked = true;
+        const m = document.getElementById('bankProviderMsg');
+        if (m) m.innerHTML = 'Hoy los retiros salen por <b>' + (j.provider === 'ghwallet' ? 'GH Wallet' : 'hgcash') + '</b>' +
+            (j.provider === 'ghwallet' && !j.ghwalletReady ? ' <span style="color:#ff8080;">(sin token: el botón Pagar va a fallar)</span>' : '') +
+            (j.provider === 'hgcash' && !j.hgcashReady ? ' <span style="color:#ff8080;">(sin token de hgcash)</span>' : '');
+    } catch (_) {}
+}
+async function saveBankProvider() {
+    const sel = document.querySelector('input[name="bankProvider"]:checked');
+    if (!sel) return;
+    const label = sel.value === 'ghwallet' ? 'GH Wallet' : 'hgcash';
+    if (!confirm('A partir de ahora, al tocar "Pagar" en un retiro, la plata sale de la cuenta de ' + label + '. ¿Confirmás?')) return;
+    const m = document.getElementById('bankProviderMsg');
+    try {
+        const r = await authFetch('/api/admin/bank-provider', { method: 'POST', body: JSON.stringify({ provider: sel.value }) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } return; }
+        showToast('Retiros por ' + label, 'success');
+        loadBankProvider();
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+async function loadGhwalletCredentials() {
+    const st = document.getElementById('ghwalletCredStatus');
+    const box = document.getElementById('ghwalletAccountBox');
+    try {
+        const r = await authFetch('/api/admin/ghwallet/credentials');
+        if (!r.ok) { if (st) st.textContent = 'No se pudo leer el estado.'; return; }
+        const j = await r.json();
+        const src = j.tokenSource === 'panel' ? '<b style="color:#66ff99;">PANEL</b> (token …' + escapeHtml(j.tokenLast4 || '') + ')'
+            : j.tokenSource === 'ssm' ? '<b style="color:#ffd479;">AWS (SSM)</b>' : '<b style="color:#ff8080;">NINGUNO — GH Wallet no opera</b>';
+        const sec = j.panelSecret ? '<b style="color:#66ff99;">PANEL</b> (…' + escapeHtml(j.secretLast4 || '') + ')' + (j.ssmSecret ? ' + AWS de respaldo' : '')
+            : (j.ssmSecret ? '<b style="color:#ffd479;">AWS (SSM)</b>' : '<b style="color:#ff8080;">NINGUNO — los avisos de GH Wallet se rechazan</b>');
+        if (st) st.innerHTML = '🔑 Token en uso: ' + src + (j.test ? ' <span style="color:#ffb74d;font-weight:800;">[PRUEBAS · no toca plata]</span>' : '') +
+            '<br>✍️ Secreto del webhook: ' + sec +
+            (j.updatedBy ? '<br><span style="color:#888;">Último cambio desde el panel: ' + escapeHtml(j.updatedBy) + ' · ' + (j.updatedAt ? fmtFechaHoraAR(j.updatedAt) : '') + '</span>' : '') +
+            (j.decryptError ? '<br><span style="color:#ff8080;">⚠️ Lo guardado en el panel no se pudo leer (¿cambió JWT_SECRET?). Se está usando AWS. Volvé a cargarlo.</span>' : '');
+        const u = document.getElementById('ghwalletCredWebhookUrl'); if (u) u.textContent = j.webhookFullUrl || '';
+        if (j.tokenSource !== 'none') loadGhwalletAccount(); else if (box) box.innerHTML = '';
+    } catch (_) { if (st) st.textContent = 'No se pudo leer el estado.'; }
+}
+async function loadGhwalletAccount() {
+    const box = document.getElementById('ghwalletAccountBox'); if (!box) return;
+    try {
+        const r = await authFetch('/api/admin/ghwallet/account');
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok || !j.enabled) { box.innerHTML = ''; return; }
+        let h = '';
+        (j.accounts || []).forEach(function (a) {
+            h += '🏦 <b>' + escapeHtml(a.titular || '—') + '</b> · CVU <code>' + escapeHtml(a.cvu || a.cbu || '—') + '</code> · alias <code>' + escapeHtml(a.alias || '—') + '</code>' + (a.cuit ? ' · CUIT ' + escapeHtml(a.cuit) : '') + '<br>';
+        });
+        if (j.accountError) h += '<span style="color:#ff8080;">No se pudo leer la cuenta: ' + escapeHtml(String(j.accountError)) + '</span><br>';
+        if (j.balance) h += '💰 Saldo GH Wallet: <b>$' + Number(j.balance.available).toLocaleString('es-AR') + '</b> disponible' + (j.balance.total !== j.balance.available ? ' (total $' + Number(j.balance.total).toLocaleString('es-AR') + ')' : '');
+        else if (j.balanceError) h += '<span style="color:#ff8080;">No se pudo leer el saldo: ' + escapeHtml(String(j.balanceError)) + '</span>';
+        if ((j.accounts || []).length) h += '<br><small style="color:#aaa;">Esta es la cuenta a la que transfieren tus clientes con GH Wallet: cargala en la tarjeta del CBU de arriba cuando quieras que la vean.</small>';
+        box.innerHTML = h;
+    } catch (_) { box.innerHTML = ''; }
+}
+async function saveGhwalletCredentials() {
+    const t = (document.getElementById('ghwalletCredToken').value || '').trim();
+    const s = (document.getElementById('ghwalletCredSecret').value || '').trim();
+    const m = document.getElementById('ghwalletCredMsg');
+    if (!t && !s) { if (m) { m.style.color = '#ff8080'; m.textContent = 'Pegá el token y/o el secreto'; } return; }
+    if (m) { m.style.color = '#aaa'; m.textContent = '⏳ Probando contra GH Wallet…'; }
+    try {
+        const r = await authFetch('/api/admin/ghwallet/credentials', { method: 'POST', body: JSON.stringify({ token: t, webhookSecret: s }) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } return; }
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado' + (j.test ? ' (clave de PRUEBAS)' : '') + (j.accounts && j.accounts.length ? ' · cuenta: ' + (j.accounts[0].titular || j.accounts[0].cvu || '') : ''); }
+        document.getElementById('ghwalletCredToken').value = '';
+        document.getElementById('ghwalletCredSecret').value = '';
+        loadGhwalletCredentials(); loadBankProvider();
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+async function clearGhwalletCredentials() {
+    if (!confirm('¿Borrar el token/secreto de GH Wallet cargados en el panel y volver a usar los de AWS (SSM)?')) return;
+    const m = document.getElementById('ghwalletCredMsg');
+    try {
+        const r = await authFetch('/api/admin/ghwallet/credentials', { method: 'DELETE' });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo'); } return; }
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Volvió a usar AWS (SSM)'; }
+        loadGhwalletCredentials(); loadBankProvider();
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+window.loadGhwalletCard = loadGhwalletCard; window.saveGhwalletConfig = saveGhwalletConfig;
+window.loadBankProvider = loadBankProvider; window.saveBankProvider = saveBankProvider;
+window.loadGhwalletCredentials = loadGhwalletCredentials; window.saveGhwalletCredentials = saveGhwalletCredentials; window.clearGhwalletCredentials = clearGhwalletCredentials;
+
 async function loadHgcashConfig() {
     const form = document.getElementById('hgcashConfigForm');
     const movPanel = document.getElementById('hgcashMovementsPanel');
@@ -6439,6 +6562,7 @@ async function loadHgcashConfig() {
         if (movPanel) movPanel.style.display = '';
         loadHgcashCredentials(); // #320
         loadHgcashFanout(); // #326
+        loadGhwalletCard(); // #332
         loadHgcashMovements(1);
         loadHgcashBalance();
         startHgcashLive();
@@ -6505,7 +6629,10 @@ async function loadHgcashMovements(page = 1) {
         }
         body.innerHTML = movs.map(m => {
             const fecha = m.createdAt ? fmtFechaHoraAR(m.createdAt) : '—';
-            const dir = m.direction === 'Inbound' ? '⬇️ Entra' : (m.direction === 'Outbound' ? '⬆️ Sale' : '—');
+            const dir = (m.direction === 'Inbound' ? '⬇️ Entra' : (m.direction === 'Outbound' ? '⬆️ Sale' : '—')) +
+                (m.provider === 'ghwallet' ? ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(100,181,246,0.2);color:#64b5f6;font-weight:800;" title="GH Wallet">GH</span>' : '') +
+                (m.provider === 'ghwallet' && m.status === 'held' ? ' <span style="font-size:10px;color:#ffb74d;" title="GH Wallet todavía no la dio por firme (payment.verified)">⏳ en verificación</span>' : '') +
+                (m.provider === 'ghwallet' && m.status === 'reversed' ? ' <span style="font-size:10px;color:#ff8080;">↩️ REVERTIDA</span>' : '');
             const monto = m.amount != null ? '$' + Number(m.amount).toLocaleString('es-AR') : (m.amountRaw || '—');
             const origen = m.fromName || '—';
             const cbuOrigen = m.fromCBU || '—';
@@ -6516,7 +6643,7 @@ async function loadHgcashMovements(page = 1) {
             const op = m.coelsaCode || m.externalId || '—';
             return '<tr>' +
                 '<td style="white-space:nowrap;">' + escapeHtml(fecha) + '</td>' +
-                '<td>' + escapeHtml(dir) + '</td>' +
+                '<td>' + dir + '</td>' +
                 '<td style="white-space:nowrap;">' + escapeHtml(monto) + '</td>' +
                 '<td>' + escapeHtml(origen) + '</td>' +
                 '<td style="font-size:11px;">' + escapeHtml(cbuOrigen) + '</td>' +

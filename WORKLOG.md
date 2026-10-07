@@ -8,6 +8,74 @@
 
 ## Sesión 2026-10-07
 
+### 332. GH WALLET — segundo banco con API, PARALELO a hgcash (elegible, config separada)
+- Owner: "quiero implementar lo que está en hgcash pero con otro banco, GH Wallet; que tenga la
+  opción de elegir hgcash o GH Wallet y que se puedan cargar en paralelo, separado". Doc:
+  ghwallet.net/integration (capturas) + mensaje de soporte (Enzo, 2026-10-07): sin crear
+  cobros, CVU fijo para todos, cada transferencia llega por webhook con CUIT/nombre/cuenta del
+  pagador y el coelsa del comprobante; **cargar SOLO con `payment.verified`** (`payment.paid`
+  llega antes con `verify_state:"held"`); `payment.reversed` = la plata no quedó; dedupe por
+  `event + data.id`.
+- **`src/services/ghwalletService.js`** (nuevo): Bearer `gw_live_…`/`gw_test_…`, token panel >
+  SSM (`GHWALLET_API_TOKEN`, `GHWALLET_API_URL` default `https://ghwallet.net/api/v1`),
+  `getAccount` (titular/CVU/alias/cuit — sirve para probar el token), `getBalance`,
+  `createPayout` (CBU/CVU 22 dígitos, pesos enteros, `Idempotency-Key`), `getPayout`,
+  `verifyWebhookSignature` (HMAC-SHA256 hex de `{ts}.{body crudo}`, ventana 5 min,
+  `timingSafeEqual`, lista de secretos panel+SSM), `signWebhook` (tests).
+- **Mismo pipeline que hgcash:** `POST /api/ghwallet/webhook` traduce `data` a un
+  `BankMovement` (`provider:'ghwallet'`, `movementId:'gw:<id>'`, `coelsaCode = coelsa_id`,
+  `externalId = bank_reference`, `fromName/fromCUIT/fromCBU` del `payer`, status `held` |
+  `done` | `reversed`) y entra a `hgcashMatchFromMovement` / `hgcashMatchFromComprobante` /
+  `hgcashAutoCarga` sin cambios de lógica: mismo matcheo (coelsa / nombre), mismos candados
+  (`HgcashCharge` por coelsa, guard de duplicados, multicuenta bancaria #259), misma
+  reference `vip-hg-<coelsa>`. Solo `done` (verificado) cuenta como acreditado. Dedupe
+  atómico por evento (`BankMovement.processedEvents`). `payment.reversed` sobre un cobro YA
+  cargado → nota adminOnly 🚨 + `security_alert` (descontar a mano; no se debita solo);
+  sobre uno pendiente → `ignored`. `payment.expired` se ignora (es de cobros creados por
+  API). Fail-closed en producción sin secreto. Reenvío a otras páginas (#326): mismos
+  destinos, con la ruta `/api/ghwallet/webhook` y los headers `X-Wallet-*`.
+- **Config separada:** `Config['ghwallet']` `{enabled, mode}` (interruptor y modo propios;
+  ventana/mínimo/guard/moneda se comparten con la card de hgcash porque son del pipeline).
+  `_bankCfgForMovement(m)` gatea cada movimiento con la config de SU banco; el matcheo desde
+  comprobante corre si CUALQUIERA de los dos bancos está activo y evalúa cada candidato con
+  la config de su banco. **`Config['bankProvider']`** = `hgcash` | `ghwallet`: por qué banco
+  salen los RETIROS (`GET/POST /api/admin/bank-provider`).
+- **Retiros por GH Wallet** (`_payPayoutViaGhwallet`, rama al inicio de
+  `POST /api/admin/payouts/:id/pay`): exige CBU/CVU de 22 dígitos (GH no resuelve alias),
+  mismo claim atómico y mismo descuento de fichas (`_deductChipsAtConfirm`, guard
+  `debitConfirmed`), `createPayout` con `Idempotency-Key = vip-payout-<id>` y `client_ref =
+  payout.id`. Mapeo: 200 `completed` → paid; 202 `processing` → paying (webhook/poll);
+  409 `duplicate_of` → paying siguiendo ese; 500 con id → paying y se consulta; 409
+  `needs_confirmation` → failed con aviso (NO se auto-confirma un duplicado); 402/422/503 →
+  failed con el motivo en castellano (fichas ya descontadas → nota adminOnly, como hgcash).
+  `PendingPayout.gwPayoutId` (+ `paidVia:'ghwallet'`). `handlePayoutStatusWebhook(p,
+  provider)` reusado para `payout.completed`/`payout.failed` (busca por `client_ref`), sin
+  comprobante PDF (GH no lo tiene). `_pollPayingPayouts` y `/payouts/:id/sync` consultan el
+  banco de cada payout. `GET /api/admin/payouts` → `payEnabled` del banco elegido.
+- **Credenciales desde el panel** (clon de #320): `Config['ghwalletCredentials']` cifrado,
+  `GET/POST/DELETE /api/admin/ghwallet/credentials` (el token se prueba con `GET /account`;
+  acepta `gw_test_` y lo marca como PRUEBAS), `GET/POST /api/admin/ghwallet/config`,
+  `GET /api/admin/ghwallet/account` (cuenta + saldo). Webhook: acepta firma con el secreto del
+  panel o `GHWALLET_WEBHOOK_SECRET` de SSM.
+- **Panel (admin-sw v77):** card "🏦 GH Wallet (banco automático paralelo)" debajo de la de
+  hgcash: radio "¿Por qué banco salen los RETIROS?", modo + activar, recuadro de token/secreto
+  con la URL del webhook, cuenta (titular/CVU/alias) y saldo. En "Movimientos del banco" los
+  de GH llevan la marca `GH` (+ "⏳ en verificación" / "↩️ REVERTIDA").
+- **Lo que NO cambia:** nada de hgcash (su webhook, config, pagos, comprobante PDF). Con GH
+  Wallet apagado y sin token, el sistema se comporta exactamente como antes.
+- **Probado:** `node --check` en los 6 archivos; firma del webhook (ok / inválida / vieja /
+  sin secreto), traducción de los 3 eventos y mapeo de estados, aislados. **Back necesita
+  deploy.** PROBAR con la clave `gw_test_` (ambiente de pruebas de GH Wallet, mismos
+  endpoints, no toca plata): (1) panel → GH Wallet → pegar token de pruebas + secreto →
+  "Probar y guardar" → muestra la cuenta y el saldo de prueba; cargar la URL del webhook en
+  GH Wallet; (2) activar en modo sombra; mandar un comprobante y simular el cobro
+  (`POST /payments/{id}/simular-pago` solo aplica a cobros creados por API — para el flujo
+  real pedirle a Enzo que active los avisos para la clave y hacer una transferencia chica) →
+  el movimiento aparece con `GH ⏳` y, con `payment.verified`, matchea; (3) retiros: elegir GH
+  Wallet como banco, Pagar un retiro con CBU de 22 dígitos → `completed`/`processing` según
+  `simular`; (4) un aviso repetido → log "aviso repetido descartado". Avisarle a Enzo qué
+  clave de API se usa para que active los avisos.
+
 ### 331. Empujón "📲 Instalá la app" después de cada carga acreditada
 - Owner: quiere más visibilidad e incentivo para agregar la app al inicio (hoy solo estaba en
   PREMIOS); eligió el empujón post-carga con el texto "instalá la app para reclamar tu ruleta

@@ -52,6 +52,9 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   proxy a /src/models). **OJO: hay DOS connectDB** (este y `src/models/index.js`); el
   segundo NO se usa desde server.js. No tocar schemas en config/database.js (sólo
   define ExternalUser y UserActivity; el resto es proxy a /src/models).
+- `src/services/hgcashService.js` y `src/services/ghwalletService.js` — los DOS bancos con
+  API (hgcash y GH Wallet, #332). Comparten el pipeline de matcheo/auto-carga de server.js;
+  `Config['bankProvider']` elige por cuál salen los retiros.
 - `src/services/giroxService.js` — **cliente ÚNICO de la Partner API** (altas, saldo,
   cargas, retiros, bonos, cambio de clave y login único/SSO).
 - `src/services/giroxUserLinkService.js` — resuelve y cachea `User.giroxUserId`.
@@ -94,6 +97,11 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   usar `hgcashPay.getToken()` y `_hgcashWebhookSecrets()`. **Reenvío a otras páginas (#326):**
   también desde el panel (`Config['hgcashFanout']`, hasta 5 URLs; sin config vale
   `HGCASH_FANOUT_URL`). Un aviso ya reenviado (`X-Forwarded-By`) no se vuelve a reenviar.
+- **GH Wallet (#332):** segundo banco, paralelo a hgcash, mismo pipeline. Acredita SOLO con
+  el evento `payment.verified` (plata firme); `payment.paid` llega antes como `held` y NO se
+  carga. Retiros por el banco elegido en el panel (`Config['bankProvider']`); GH no resuelve
+  alias (CBU/CVU de 22) y su clave real necesita el permiso `payouts:create`. Credenciales
+  como hgcash: panel > SSM (`GHWALLET_API_TOKEN`, `GHWALLET_WEBHOOK_SECRET`).
 - **JWT_SECRET y otros secrets** se cargan desde AWS SSM en el bootstrap async, NO al
   `require()`. Por eso hay lazy getters en `src/middlewares/auth.js` y rutas.
 - **IDEMPOTENCIA POR `reference` (lo más importante de la plataforma nueva).** Cargas,

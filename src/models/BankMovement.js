@@ -16,6 +16,11 @@ const mongoose = require('mongoose');
 const bankMovementSchema = new mongoose.Schema({
   // id interno del movimiento que manda hgcash (UUID). Único → dedupe de webhooks.
   movementId: { type: String, required: true, unique: true, index: true },
+  // #332: banco que lo notificó. 'hgcash' (histórico) | 'ghwallet' (GH Wallet; movementId = 'gw:<id>').
+  provider: { type: String, default: 'hgcash', index: true },
+  // #332 (GH Wallet): eventos ya procesados de este cobro ('payment.paid', 'payment.verified',
+  // 'payment.reversed'…) → un aviso repetido se descarta (dedupe por event + data.id).
+  processedEvents: { type: [String], default: [] },
   externalId: { type: String, default: null },     // id externo del banco/red
   coelsaCode: { type: String, default: null, index: true },
 

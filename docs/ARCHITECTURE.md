@@ -5,7 +5,8 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-06** — cashback instantáneo retirado (#329, §5).
+> Última actualización: **2026-10-07** — GH Wallet, banco con API paralelo a hgcash (#332: §2
+> BankMovement, §5 flujo, §9). Antes: cashback instantáneo retirado (#329, §5).
 > Antes ese mismo día: reenvío de webhooks hgcash desde el panel (#326, §5).
 > Antes ese mismo día: tope del bono de bienvenida para cualquier % (#324, §5).
 > Antes ese mismo día: trampas del entorno EB clonado (#323, §9).
@@ -130,7 +131,10 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   (sobrevive al TTL de Message). Umbrales: cargas 2min / pagos 30min (configurables).
 
 ### Plata / banco automático (hgcash)
-- **BankMovement** — cada movimiento que hgcash notifica por webhook. `matchStatus`:
+- **BankMovement** — cada movimiento que un banco con API notifica por webhook: hgcash
+  (`provider:'hgcash'`) o GH Wallet (`provider:'ghwallet'`, `movementId:'gw:<id>'`,
+  `processedEvents` para deduplicar `event + data.id`, status `held` → `done` → `reversed`,
+  #332). `matchStatus`:
   pending→claiming→shadow_matched|auto_charged|manual_charged|needs_review|duplicate|
   error|ignored. Dedupe por `movementId` único.
 - **Comprobante** — cada imagen que la IA (Claude vision) clasificó como comprobante.
@@ -757,6 +761,17 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   `accountId` cacheado. El webhook acepta la firma con el secreto del panel O el de SSM
   (cambio de cuenta sin perder avisos). ⚠️ Si cambia JWT_SECRET lo del panel no se descifra
   → cae a SSM y el panel lo avisa.
+- **GH Wallet (#332, banco PARALELO):** `POST /api/ghwallet/webhook` (HMAC-SHA256 de
+  `{ts}.{body crudo}`, headers `X-Wallet-Signature/Timestamp`, ventana 5 min, fail-closed sin
+  secreto) traduce `payment.paid` (held) / `payment.verified` (done) / `payment.reversed` a
+  un `BankMovement` con `provider:'ghwallet'` y lo mete en el MISMO pipeline de abajo (solo
+  `done` se carga; reversión de un cobro ya cargado → alerta, no se debita solo).
+  `Config['ghwallet']` `{enabled, mode}` propio (el resto del pipeline se comparte);
+  `Config['bankProvider']` elige por qué banco salen los RETIROS (`_payPayoutViaGhwallet`:
+  CBU/CVU 22 dígitos, `Idempotency-Key = vip-payout-<id>`, 202 = en vuelo → webhook
+  `payout.*`/poll, `PendingPayout.gwPayoutId`). Credenciales cifradas desde el panel como
+  hgcash (`Config['ghwalletCredentials']`, SSM `GHWALLET_API_TOKEN`/`GHWALLET_WEBHOOK_SECRET`
+  de respaldo). `src/services/ghwalletService.js`.
 - **AUTO-CARGA hgcash** (`POST /api/hgcash/webhook`, firma HMAC sobre rawBody,
   fail-closed en prod): guarda BankMovement → matching contra Comprobantes por
   monto + (N° operación==coelsa/externalID, o nombre de origen + destino consistente)
@@ -1099,6 +1114,12 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
 
 ## 9. Trampas / "no rompas esto"
 
+- **Dos bancos con API (#332)**: hgcash y GH Wallet comparten `BankMovement` y TODO el
+  pipeline de matcheo/auto-carga (`hgcashMatch*`, `hgcashAutoCarga`, `HgcashCharge`). Un
+  cambio en ese pipeline afecta a los dos. Cada movimiento se gatea con la config de SU
+  banco (`_bankCfgForMovement`); los retiros salen por `Config['bankProvider']`. GH Wallet
+  acredita SOLO con `payment.verified` (status `done`); `held` nunca se carga. Nuevo evento
+  de GH ⇒ agregarlo al webhook (los desconocidos se ignoran con 200).
 - **SMS y registro APAGADOS por default (#322)**: interruptores `Config['accessSwitches']`
   (§3). No "arreglar" un 403 `REGISTRATION_DISABLED` / 503 `SMS_DISABLED` en el código: se
   prende desde el panel. En el front, todo lo que dependa de SMS o registro pregunta
