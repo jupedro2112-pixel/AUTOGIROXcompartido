@@ -18697,6 +18697,49 @@ app.delete('/api/admin/hgcash/fanout', authMiddleware, adminMiddleware, async (r
 // ============================================
 // #332 GH WALLET — endpoints del panel (solo admin general)
 // ============================================
+// #333: sección general "Bancos automáticos": por cuál(es) ENTRAN las cargas y por cuál
+// SALEN los retiros. Escribe hgcash.enabled / ghwallet.enabled / bankProvider.
+async function _banksPayload() {
+  const [hg, gw, provider] = await Promise.all([getHgcashConfig(), getGhwalletConfig(), getBankProvider()]);
+  const incoming = hg.enabled && gw.enabled ? 'both' : (hg.enabled ? 'hgcash' : (gw.enabled ? 'ghwallet' : 'none'));
+  return {
+    incoming, payouts: provider,
+    hgcash: { enabled: hg.enabled, mode: hg.mode, token: hgcashPay.getTokenSource(), secret: _hgcashWebhookSecrets().length > 0, accountName: hg.accountName || '', cbu: hg.cbu || '' },
+    ghwallet: { enabled: gw.enabled, mode: gw.mode, token: ghwallet.getTokenSource(), secret: _ghwalletWebhookSecrets().length > 0, test: ghwallet.isTestToken() }
+  };
+}
+app.get('/api/admin/banks', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    res.json(await _banksPayload());
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/banks', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const b = req.body || {};
+    const incoming = String(b.incoming || '').toLowerCase();
+    const payouts = String(b.payouts || '').toLowerCase();
+    if (!['hgcash', 'ghwallet', 'both', 'none'].includes(incoming)) return res.status(400).json({ error: 'Opción de cargas inválida' });
+    if (!BANK_PROVIDERS.includes(payouts)) return res.status(400).json({ error: 'Banco de retiros inválido' });
+    const hgOn = incoming === 'hgcash' || incoming === 'both';
+    const gwOn = incoming === 'ghwallet' || incoming === 'both';
+    const hg = await getHgcashConfig();
+    if (hgOn && !hg.accountName && !hg.cbu) return res.status(400).json({ error: 'Para recibir por hgcash cargá primero el NOMBRE de la cuenta (o el CBU) en el bloque de hgcash.' });
+    if (gwOn && !ghwallet.isEnabled()) return res.status(400).json({ error: 'Para recibir por GH Wallet cargá primero su token en el bloque de GH Wallet ("Probar y guardar").' });
+    if (gwOn && !_ghwalletWebhookSecrets().length) return res.status(400).json({ error: 'Para recibir por GH Wallet cargá también el secreto del webhook: sin él sus avisos se rechazan.' });
+    if (hgOn !== hg.enabled) await setConfig('hgcash', Object.assign({}, hg, { enabled: hgOn }));
+    const gw = await getGhwalletConfig();
+    if (gwOn !== gw.enabled) await Config.set('ghwallet', Object.assign({}, gw, { enabled: gwOn }), req.user.username);
+    await Config.set('bankProvider', payouts, req.user.username);
+    logger.info(`[banks] ${req.user.username}: cargas por ${incoming} · retiros por ${_bankLabel(payouts)}`);
+    res.json(Object.assign({ success: true }, await _banksPayload()));
+  } catch (e) {
+    logger.error(`[banks] guardar falló: ${e.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
 app.get('/api/admin/bank-provider', authMiddleware, adminMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
   res.json({ provider: await getBankProvider(), options: BANK_PROVIDERS, hgcashReady: hgcashPay.isEnabled(), ghwalletReady: ghwallet.isEnabled() });
@@ -18854,6 +18897,8 @@ app.get('/api/admin/hgcash/movements', authMiddleware, adminMiddleware, async (r
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
     const q = {};
     if (req.query.status) q.matchStatus = String(req.query.status);
+    if (req.query.provider === 'ghwallet') q.provider = 'ghwallet'; // #333
+    else if (req.query.provider === 'hgcash') q.provider = { $in: ['hgcash', null] };
     const total = await BankMovement.countDocuments(q);
     const movements = await BankMovement.find(q)
       .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean();

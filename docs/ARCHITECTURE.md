@@ -1046,6 +1046,11 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   loguea: consulta un jugador inexistente — 404 = key válida, 401 = key rechazada.
 - `public/admin-sw.js` (scope /adminprivado2026/, servido por un handler propio; versión
   actual en su `CACHE_VERSION`): network-first no-store para el shell.
+- **Sección "🏦 Bancos automáticos"** (#333): elige por cuál(es) banco entran las cargas
+  (uno / los dos / ninguno → `hgcash.enabled` + `ghwallet.enabled`) y por cuál salen los
+  retiros (`bankProvider`) vía `GET/POST /api/admin/banks`; abajo, un bloque por banco
+  (🟡 hgcash / 🔵 GH Wallet) con modo, cuenta y credenciales. El "activar" NO está en los
+  bloques.
 - **Card "📵 SMS y registro"** (Configuración, solo admin general, #322): interruptores de
   §3. Con el SMS apagado el ítem "SMS Masivo" del menú se oculta.
 - Servido por handlers propios con cache en memoria (`readFileCached`) + ADMIN_HOST

@@ -6424,7 +6424,67 @@ async function clearHgcashFanout() {
 }
 window.loadHgcashFanout = loadHgcashFanout; window.saveHgcashFanout = saveHgcashFanout; window.clearHgcashFanout = clearHgcashFanout;
 
-// ====== #332 GH WALLET (banco paralelo) ======
+// ====== #332/#333 BANCOS AUTOMÁTICOS: sección general + GH Wallet ======
+// La sección general ("Bancos automáticos") decide por cuál(es) entran las cargas y
+// por cuál salen los retiros (GET/POST /api/admin/banks). Cada banco tiene su bloque
+// con modo, cuenta y credenciales; el "activar" ya no vive en cada bloque.
+let _banksState = null;
+function _bankStatusTxt(key, b) {
+    const name = key === 'ghwallet' ? 'GH Wallet' : 'hgcash';
+    const color = key === 'ghwallet' ? '#64b5f6' : '#d4af37';
+    const tok = b.token === 'panel' ? 'token PANEL' : (b.token === 'ssm' ? 'token AWS' : '<span style="color:#ff8080;">sin token</span>');
+    const sec = b.secret ? 'firma ✅' : '<span style="color:#ff8080;">sin secreto del webhook</span>';
+    return '<b style="color:' + color + ';">' + name + '</b>: ' + (b.enabled ? '🟢 recibe cargas' : '⚪ no recibe cargas') +
+        ' · modo ' + (b.mode === 'auto' ? '<b>AUTO</b> (carga sola)' : 'SOMBRA (no carga)') + ' · ' + tok + ' · ' + sec +
+        (b.test ? ' · <span style="color:#ffb74d;font-weight:800;">PRUEBAS</span>' : '');
+}
+function _renderBanks(j) {
+    _banksState = j;
+    const inc = document.querySelector('input[name="banksIncoming"][value="' + j.incoming + '"]'); if (inc) inc.checked = true;
+    const pay = document.querySelector('input[name="banksPayouts"][value="' + j.payouts + '"]'); if (pay) pay.checked = true;
+    const sum = document.getElementById('banksSummary');
+    if (sum) {
+        sum.innerHTML = _bankStatusTxt('hgcash', j.hgcash) + '<br>' + _bankStatusTxt('ghwallet', j.ghwallet) +
+            '<br>💸 Retiros: salen por <b>' + (j.payouts === 'ghwallet' ? 'GH Wallet' : 'hgcash') + '</b>' +
+            ((j.payouts === 'ghwallet' && j.ghwallet.token === 'none') || (j.payouts === 'hgcash' && j.hgcash.token === 'none') ? ' <span style="color:#ff8080;">(ese banco no tiene token: el botón Pagar va a fallar)</span>' : '');
+    }
+    const hl = document.getElementById('hgcashStatusLine');
+    if (hl) { const extra = document.getElementById('hgcashExtraLine'); hl.innerHTML = _bankStatusTxt('hgcash', j.hgcash); if (extra) hl.appendChild(extra); }
+    const gl = document.getElementById('ghwalletStatusLine');
+    if (gl) gl.innerHTML = _bankStatusTxt('ghwallet', j.ghwallet);
+}
+async function loadBanks() {
+    const form = document.getElementById('banksForm');
+    const header = document.getElementById('banksHeader');
+    try {
+        const r = await authFetch('/api/admin/banks');
+        if (!r.ok) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; return; }
+        if (form) form.style.display = '';
+        if (header) header.style.display = '';
+        _renderBanks(await r.json());
+    } catch (_) {}
+}
+async function saveBanks() {
+    const inc = document.querySelector('input[name="banksIncoming"]:checked');
+    const pay = document.querySelector('input[name="banksPayouts"]:checked');
+    if (!inc || !pay) { showToast('Elegí por dónde entran las cargas y por dónde salen los retiros', 'error'); return; }
+    const incTxt = { hgcash: 'solo hgcash', ghwallet: 'solo GH Wallet', both: 'los DOS bancos a la vez', none: 'NINGUNO (carga automática apagada)' }[inc.value];
+    const payTxt = pay.value === 'ghwallet' ? 'GH Wallet' : 'hgcash';
+    const prev = _banksState || {};
+    let aviso = 'Cargas: se reciben por ' + incTxt + '.\nRetiros: salen por ' + payTxt + '.';
+    const modoAuto = (inc.value === 'hgcash' || inc.value === 'both') && prev.hgcash && prev.hgcash.mode === 'auto' || (inc.value === 'ghwallet' || inc.value === 'both') && prev.ghwallet && prev.ghwallet.mode === 'auto';
+    if (modoAuto) aviso += '\n\n⚠️ Hay un banco en modo AUTO: las transferencias que matcheen se cargan solas.';
+    if (!confirm(aviso + '\n\n¿Guardar?')) { if (_banksState) _renderBanks(_banksState); return; }
+    const m = document.getElementById('banksMsg');
+    try {
+        const r = await authFetch('/api/admin/banks', { method: 'POST', body: JSON.stringify({ incoming: inc.value, payouts: pay.value }) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } if (_banksState) _renderBanks(_banksState); return; }
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado'; }
+        _renderBanks(j);
+        showToast('Bancos guardados', 'success');
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
 async function loadGhwalletCard() {
     const form = document.getElementById('ghwalletForm');
     const header = document.getElementById('ghwalletHeader');
@@ -6434,50 +6494,22 @@ async function loadGhwalletCard() {
         if (form) form.style.display = '';
         if (header) header.style.display = '';
         const j = await r.json();
-        const en = document.getElementById('ghwalletEnabled'); if (en) en.checked = j.enabled === true;
         const md = document.getElementById('ghwalletMode'); if (md) md.value = j.mode === 'auto' ? 'auto' : 'shadow';
         const u = document.getElementById('ghwalletCredWebhookUrl'); if (u) u.textContent = j.webhookFullUrl || '';
-        loadBankProvider();
         loadGhwalletCredentials();
     } catch (_) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
 }
 async function saveGhwalletConfig() {
     const m = document.getElementById('ghwalletCfgMsg');
-    const enabled = document.getElementById('ghwalletEnabled').checked;
     const mode = document.getElementById('ghwalletMode').value;
-    if (enabled && mode === 'auto' && !confirm('GH Wallet en modo AUTOMÁTICO: las transferencias verificadas que matcheen con un comprobante se cargan solas. ¿Confirmás?')) return;
+    if (mode === 'auto' && !confirm('GH Wallet en modo AUTOMÁTICO: cuando reciba cargas, las transferencias verificadas que matcheen con un comprobante se cargan solas. ¿Confirmás?')) return;
     try {
-        const r = await authFetch('/api/admin/ghwallet/config', { method: 'POST', body: JSON.stringify({ enabled, mode }) });
+        const r = await authFetch('/api/admin/ghwallet/config', { method: 'POST', body: JSON.stringify({ mode }) });
         const j = await r.json().catch(function () { return {}; });
         if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } return; }
-        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado: ' + (j.enabled ? 'ACTIVO' : 'apagado') + ' · modo ' + (j.mode === 'auto' ? 'automático' : 'sombra'); }
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Modo ' + (j.mode === 'auto' ? 'automático' : 'sombra') + ' guardado'; }
         showToast('GH Wallet guardado', 'success');
-    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
-}
-async function loadBankProvider() {
-    try {
-        const r = await authFetch('/api/admin/bank-provider');
-        if (!r.ok) return;
-        const j = await r.json();
-        const el = document.querySelector('input[name="bankProvider"][value="' + j.provider + '"]'); if (el) el.checked = true;
-        const m = document.getElementById('bankProviderMsg');
-        if (m) m.innerHTML = 'Hoy los retiros salen por <b>' + (j.provider === 'ghwallet' ? 'GH Wallet' : 'hgcash') + '</b>' +
-            (j.provider === 'ghwallet' && !j.ghwalletReady ? ' <span style="color:#ff8080;">(sin token: el botón Pagar va a fallar)</span>' : '') +
-            (j.provider === 'hgcash' && !j.hgcashReady ? ' <span style="color:#ff8080;">(sin token de hgcash)</span>' : '');
-    } catch (_) {}
-}
-async function saveBankProvider() {
-    const sel = document.querySelector('input[name="bankProvider"]:checked');
-    if (!sel) return;
-    const label = sel.value === 'ghwallet' ? 'GH Wallet' : 'hgcash';
-    if (!confirm('A partir de ahora, al tocar "Pagar" en un retiro, la plata sale de la cuenta de ' + label + '. ¿Confirmás?')) return;
-    const m = document.getElementById('bankProviderMsg');
-    try {
-        const r = await authFetch('/api/admin/bank-provider', { method: 'POST', body: JSON.stringify({ provider: sel.value }) });
-        const j = await r.json().catch(function () { return {}; });
-        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } return; }
-        showToast('Retiros por ' + label, 'success');
-        loadBankProvider();
+        loadBanks();
     } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
 }
 async function loadGhwalletCredentials() {
@@ -6529,7 +6561,7 @@ async function saveGhwalletCredentials() {
         if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado' + (j.test ? ' (clave de PRUEBAS)' : '') + (j.accounts && j.accounts.length ? ' · cuenta: ' + (j.accounts[0].titular || j.accounts[0].cvu || '') : ''); }
         document.getElementById('ghwalletCredToken').value = '';
         document.getElementById('ghwalletCredSecret').value = '';
-        loadGhwalletCredentials(); loadBankProvider();
+        loadGhwalletCredentials(); loadBanks();
     } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
 }
 async function clearGhwalletCredentials() {
@@ -6540,11 +6572,11 @@ async function clearGhwalletCredentials() {
         const j = await r.json().catch(function () { return {}; });
         if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo'); } return; }
         if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Volvió a usar AWS (SSM)'; }
-        loadGhwalletCredentials(); loadBankProvider();
+        loadGhwalletCredentials(); loadBanks();
     } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
 }
+window.loadBanks = loadBanks; window.saveBanks = saveBanks;
 window.loadGhwalletCard = loadGhwalletCard; window.saveGhwalletConfig = saveGhwalletConfig;
-window.loadBankProvider = loadBankProvider; window.saveBankProvider = saveBankProvider;
 window.loadGhwalletCredentials = loadGhwalletCredentials; window.saveGhwalletCredentials = saveGhwalletCredentials; window.clearGhwalletCredentials = clearGhwalletCredentials;
 
 async function loadHgcashConfig() {
@@ -6563,6 +6595,7 @@ async function loadHgcashConfig() {
         loadHgcashCredentials(); // #320
         loadHgcashFanout(); // #326
         loadGhwalletCard(); // #332
+        loadBanks(); // #333
         loadHgcashMovements(1);
         loadHgcashBalance();
         startHgcashLive();
@@ -6573,17 +6606,14 @@ async function loadHgcashConfig() {
         set('hgcashCbu', c.cbu || '');
         set('hgcashMode', c.mode || 'shadow');
         set('hgcashWindow', c.windowMinutes || 60);
-        const en = document.getElementById('hgcashEnabled');
-        if (en) en.checked = !!c.enabled;
+        // #333: el estado (recibe/no recibe, modo, token, firma) lo pinta loadBanks en
+        // #hgcashStatusLine; acá solo se agrega la IA y la URL del webhook.
         const status = document.getElementById('hgcashStatusLine');
         if (status) {
-            const parts = [];
-            parts.push(c.enabled ? '🟢 Integración ACTIVA' : '⚪ Integración apagada');
-            parts.push(c.mode === 'auto' ? 'modo AUTO (carga sola)' : 'modo SOMBRA (no carga)');
-            parts.push(j.secretConfigured ? 'firma ✅' : 'firma ❌ (falta HGCASH_WEBHOOK_SECRET en SSM)');
-            parts.push(j.aiEnabled ? 'IA ✅' : 'IA ❌ (falta ANTHROPIC_API_KEY)');
-            status.innerHTML = parts.join(' · ') +
-                '<br><span style="color:#888;">Webhook a configurar en hgcash: <code>' + (j.webhookFullUrl || ('https://cargas1girox.com' + (j.webhookUrl || '/api/hgcash/webhook'))) + '</code></span>';
+            let extra = document.getElementById('hgcashExtraLine');
+            if (!extra) { extra = document.createElement('div'); extra.id = 'hgcashExtraLine'; status.appendChild(extra); }
+            extra.innerHTML = (j.aiEnabled ? 'IA de comprobantes ✅' : 'IA ❌ (falta ANTHROPIC_API_KEY)') +
+                ' · <span style="color:#888;">Webhook a configurar en hgcash: <code>' + (j.webhookFullUrl || ('https://cargas1girox.com' + (j.webhookUrl || '/api/hgcash/webhook'))) + '</code></span>';
         }
     } catch (e) {
         if (form) form.style.display = 'none';
@@ -6615,9 +6645,11 @@ async function loadHgcashMovements(page = 1) {
     if (!body) return;
     window._hgcashPage = page;
     const status = (document.getElementById('hgcashMovFilter') || {}).value || '';
+    const bank = (document.getElementById('hgcashMovBank') || {}).value || ''; // #333
     try {
         const qs = new URLSearchParams({ page: String(page) });
         if (status) qs.set('status', status);
+        if (bank) qs.set('provider', bank);
         const r = await authFetch('/api/admin/hgcash/movements?' + qs.toString());
         if (!r.ok) { body.innerHTML = '<tr><td colspan="10" style="color:#888;text-align:center;">Sin acceso o sin datos</td></tr>'; return; }
         const j = await r.json();
@@ -6733,22 +6765,18 @@ async function saveHgcashConfig() {
     const cbu = (document.getElementById('hgcashCbu') || {}).value || '';
     const mode = (document.getElementById('hgcashMode') || {}).value || 'shadow';
     const windowMinutes = parseInt((document.getElementById('hgcashWindow') || {}).value, 10) || 60;
-    const enabled = !!(document.getElementById('hgcashEnabled') || {}).checked;
-    if (enabled && !accountName.trim() && !cbu.trim()) {
-        showToast('Para activar cargá al menos el NOMBRE de tu cuenta hgcash (o el CBU)', 'error');
-        return;
-    }
-    if (enabled && mode === 'auto' && !confirm('Vas a activar la CARGA AUTOMÁTICA real (modo auto). Las transferencias que matcheen se van a acreditar solas. ¿Confirmás?')) {
+    // #333: si recibe o no cargas se elige en "Bancos automáticos"; acá no se manda `enabled`.
+    if (mode === 'auto' && !confirm('hgcash en modo AUTO: cuando reciba cargas, las transferencias que matcheen se van a acreditar solas. ¿Confirmás?')) {
         return;
     }
     try {
         const r = await authFetch('/api/admin/hgcash/config', {
             method: 'POST',
-            body: JSON.stringify({ accountName: accountName.trim(), cbu: cbu.trim(), mode, windowMinutes, enabled })
+            body: JSON.stringify({ accountName: accountName.trim(), cbu: cbu.trim(), mode, windowMinutes })
         });
         const j = await r.json();
         if (r.ok && j.success) {
-            showToast('Banco automático guardado', 'success');
+            showToast('hgcash guardado', 'success');
             loadHgcashConfig();
         } else {
             showToast(j.error || 'Error al guardar', 'error');

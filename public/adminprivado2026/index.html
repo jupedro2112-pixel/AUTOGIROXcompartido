@@ -938,15 +938,51 @@ document.addEventListener('change', function (ev) {
                             </div>
                             <div id="fireMilestonesMsg" style="font-size:12px;margin-top:8px;color:#aaa;"></div>
                         </div>
-                        <!-- Banco automático (hgcash / Urbana) -->
-                        <div class="panel-subheader" style="margin-top: 24px;">
-                            <h3>🏦 Banco automático (hgcash)</h3>
+                        <!-- ============================================================
+                             BANCOS AUTOMÁTICOS (#333): una sección general con las DOS decisiones
+                             (por dónde ENTRAN las cargas y por dónde SALEN los retiros) y, abajo,
+                             cada banco en su propio bloque (hgcash 🟡 / GH Wallet 🔵), sin mezclar.
+                             ============================================================ -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="banksHeader">
+                            <h3>🏦 Bancos automáticos</h3>
                         </div>
-                        <div class="cbu-form" id="hgcashConfigForm">
+                        <div class="cbu-form" id="banksForm">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                Hay dos bancos con API: <b style="color:#d4af37;">hgcash</b> y <b style="color:#64b5f6;">GH Wallet</b>. Acá elegís
+                                <b>por cuál entran las cargas</b> (uno, los dos a la vez, o ninguno) y <b>por cuál salen los retiros</b>. Cada
+                                banco se configura en su propio bloque más abajo (modo, cuenta, token y secreto).
+                            </p>
+                            <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                                <div style="flex:1;min-width:260px;padding:12px;background:rgba(255,255,255,0.03);border-radius:10px;">
+                                    <div style="font-weight:bold;font-size:13px;margin-bottom:8px;">📥 Recibir CARGAS (transferencias) por</div>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksIncoming" value="hgcash" style="width:auto;"> Solo <b style="color:#d4af37;">hgcash</b></label>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksIncoming" value="ghwallet" style="width:auto;"> Solo <b style="color:#64b5f6;">GH Wallet</b></label>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksIncoming" value="both" style="width:auto;"> <b>Los dos a la vez</b> (cada uno con su CBU; el comprobante dice de cuál vino)</label>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksIncoming" value="none" style="width:auto;"> Ninguno (carga automática apagada: todo a mano)</label>
+                                </div>
+                                <div style="flex:1;min-width:260px;padding:12px;background:rgba(255,255,255,0.03);border-radius:10px;">
+                                    <div style="font-weight:bold;font-size:13px;margin-bottom:8px;">💸 Pagar RETIROS por</div>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksPayouts" value="hgcash" style="width:auto;"> <b style="color:#d4af37;">hgcash</b> (acepta alias; manda comprobante PDF)</label>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksPayouts" value="ghwallet" style="width:auto;"> <b style="color:#64b5f6;">GH Wallet</b> (solo CBU/CVU de 22 dígitos; necesita el permiso de retiros)</label>
+                                    <small style="color:#aaa;font-size:11px;display:block;margin-top:6px;">Un solo banco paga los retiros. Se puede cambiar cuando quieras; los pagos ya en curso siguen por el banco con el que salieron.</small>
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;">
+                                <button type="button" class="btn-primary" onclick="saveBanks()">💾 Guardar bancos</button>
+                                <span id="banksMsg" style="font-size:12px;color:#aaa;"></span>
+                            </div>
+                            <div id="banksSummary" style="margin-top:12px;font-size:12px;line-height:1.7;color:#ccc;">Cargando…</div>
+                        </div>
+
+                        <!-- ===================== hgcash ===================== -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="hgcashHeader">
+                            <h3 style="color:#d4af37;">🟡 hgcash</h3>
+                        </div>
+                        <div class="cbu-form" id="hgcashConfigForm" style="border-left:4px solid #d4af37;">
                             <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 8px;">
-                                Carga automática cuando un cliente transfiere al CBU de hgcash y manda el comprobante por el chat.
-                                Matchea por <b>monto + CBU de origen + tiempo</b>. Empezá en <b>modo sombra</b> (detecta y avisa sin cargar)
-                                y pasá a <b>auto</b> cuando confíes.
+                                El cliente transfiere al CBU de hgcash y manda el comprobante por el chat; el aviso de hgcash se matchea por
+                                <b>monto + nombre/coelsa + tiempo</b>. Empezá en <b>modo sombra</b> (detecta y avisa sin cargar) y pasá a
+                                <b>auto</b> cuando confíes. Si entra o no por este banco se elige arriba, en "Bancos automáticos".
                             </p>
                             <div id="hgcashStatusLine" style="font-size:12px;margin-bottom:10px;color:#aaa;"></div>
                             <div class="form-group">
@@ -958,24 +994,22 @@ document.addEventListener('change', function (ev) {
                                 <label>CBU de tu cuenta hgcash (opcional):</label>
                                 <input type="text" id="hgcashCbu" placeholder="CBU de destino (si el comprobante lo muestra)" style="width:100%;">
                             </div>
-                            <div class="form-group">
-                                <label>Modo:</label>
-                                <select id="hgcashMode" style="width:100%;">
-                                    <option value="shadow">Sombra (detecta y avisa, NO carga)</option>
-                                    <option value="auto">Auto (carga sola con match exacto)</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Ventana de match (minutos):</label>
-                                <input type="number" id="hgcashWindow" min="1" max="1440" value="60" style="width:100%;">
-                            </div>
-                            <div class="form-group">
-                                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                    <input type="checkbox" id="hgcashEnabled" style="width:auto;"> Activar integración (apagado = no hace nada)
-                                </label>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <div class="form-group" style="flex:1;min-width:200px;">
+                                    <label>Modo:</label>
+                                    <select id="hgcashMode" style="width:100%;">
+                                        <option value="shadow">Sombra (detecta y avisa, NO carga)</option>
+                                        <option value="auto">Auto (carga sola con match exacto)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:200px;">
+                                    <label>Ventana de match (minutos):</label>
+                                    <input type="number" id="hgcashWindow" min="1" max="1440" value="60" style="width:100%;">
+                                    <small style="color:#aaa;font-size:11px;">Vale para los dos bancos (es del matcheo, no del banco).</small>
+                                </div>
                             </div>
                             <button class="btn-primary" onclick="saveHgcashConfig()">
-                                <span class="icon icon-save"></span> Guardar banco automático
+                                <span class="icon icon-save"></span> Guardar hgcash
                             </button>
 
                             <!-- #320 Credenciales de la cuenta hgcash (token + secreto) desde el panel -->
@@ -1004,6 +1038,7 @@ document.addEventListener('change', function (ev) {
                                 </div>
                             </div>
 
+
                             <!-- #326 Reenvío de los avisos de hgcash a otras páginas (misma cuenta hgcash) -->
                             <div id="hgcashFanoutBox" style="margin-top:18px;padding:14px;border:1px solid rgba(83,189,235,0.45);border-radius:10px;background:rgba(83,189,235,0.05);">
                                 <h4 style="margin:0 0 6px;color:#53bdeb;font-size:14px;">🔁 Reenviar los avisos de hgcash a otras páginas</h4>
@@ -1028,39 +1063,24 @@ document.addEventListener('change', function (ev) {
                                 </div>
                             </div>
                         </div>
-                        <!-- #332 GH WALLET: banco con API PARALELO a hgcash (solo admin general) -->
+
+                        <!-- ===================== GH Wallet (#332) ===================== -->
                         <div class="panel-subheader" style="margin-top: 24px;" id="ghwalletHeader">
-                            <h3>🏦 GH Wallet (banco automático paralelo)</h3>
+                            <h3 style="color:#64b5f6;">🔵 GH Wallet</h3>
                         </div>
-                        <div class="cbu-form" id="ghwalletForm">
-                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
-                                Segundo banco con API, independiente de hgcash. Las transferencias que entran por GH Wallet
-                                llegan por su propio webhook y se cargan con el <b>mismo matcheo por comprobante</b> (coelsa / nombre),
-                                recién cuando GH Wallet las da por <b>firmes</b> (<code>payment.verified</code>, 1-2 min). Los dos bancos
-                                pueden estar <b>activos a la vez</b>; cada uno con su interruptor y su modo. Los <b>retiros</b> salen por el
-                                banco que elijas acá abajo.
+                        <div class="cbu-form" id="ghwalletForm" style="border-left:4px solid #64b5f6;">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 8px;">
+                                Segundo banco con API, independiente de hgcash. Sus transferencias llegan por su propio webhook y se cargan
+                                con el <b>mismo matcheo por comprobante</b> (coelsa / nombre), recién cuando GH Wallet las da por <b>firmes</b>
+                                (<code>payment.verified</code>, 1-2 min después). Si entra o no por este banco se elige arriba, en "Bancos automáticos".
                             </p>
-                            <div style="margin-bottom:14px;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;">
-                                <div style="font-weight:bold;font-size:13px;margin-bottom:6px;">💸 ¿Por qué banco salen los RETIROS?</div>
-                                <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
-                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;"><input type="radio" name="bankProvider" value="hgcash" style="width:auto;"> hgcash</label>
-                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;"><input type="radio" name="bankProvider" value="ghwallet" style="width:auto;"> GH Wallet</label>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="saveBankProvider()">💾 Guardar banco de retiros</button>
-                                    <span id="bankProviderMsg" style="font-size:12px;color:#aaa;"></span>
-                                </div>
-                                <small style="color:#aaa;font-size:11px;display:block;margin-top:6px;">GH Wallet paga solo a CBU/CVU de 22 dígitos (no resuelve alias) y su clave real necesita el permiso de retiros que habilita la administración de GH Wallet.</small>
-                            </div>
+                            <div id="ghwalletStatusLine" style="font-size:12px;margin-bottom:10px;color:#aaa;"></div>
                             <div class="form-group">
                                 <label>Modo:</label>
                                 <select id="ghwalletMode" style="width:100%;">
                                     <option value="shadow">Sombra (detecta y avisa, NO carga)</option>
-                                    <option value="auto">Automático (carga sola)</option>
+                                    <option value="auto">Auto (carga sola con match exacto)</option>
                                 </select>
-                            </div>
-                            <div class="form-group">
-                                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                    <input type="checkbox" id="ghwalletEnabled" style="width:auto;"> Activar GH Wallet (apagado = sus avisos se guardan pero no se carga nada)
-                                </label>
                             </div>
                             <button type="button" class="btn-primary" onclick="saveGhwalletConfig()">💾 Guardar GH Wallet</button>
                             <span id="ghwalletCfgMsg" style="font-size:12px;color:#aaa;margin-left:8px;"></span>
@@ -1095,6 +1115,7 @@ document.addEventListener('change', function (ev) {
                         <div id="hgcashMovementsPanel">
                             <div class="panel-subheader" style="margin-top: 24px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                                 <h3 style="margin:0;">🏦 Movimientos del banco</h3>
+                                <select id="hgcashMovBank" onchange="loadHgcashMovements(1)" style="background:rgba(0,0,0,0.40);border:1px solid rgba(212,175,55,0.40);color:#fff;padding:5px 9px;border-radius:6px;font-size:12px;"><option value="">Los dos bancos</option><option value="hgcash">🟡 hgcash</option><option value="ghwallet">🔵 GH Wallet</option></select>
                                 <select id="hgcashMovFilter" onchange="loadHgcashMovements(1)" style="background:rgba(0,0,0,0.40);border:1px solid rgba(212,175,55,0.40);color:#fff;padding:5px 9px;border-radius:6px;font-size:12px;">
                                     <option value="">Todos</option>
                                     <option value="pending">Pendientes (sin match)</option>

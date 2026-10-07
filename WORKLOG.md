@@ -8,6 +8,27 @@
 
 ## Sesión 2026-10-07
 
+### 333. Panel de bancos REORDENADO: sección general + un bloque por banco (owner: "más prolijo")
+- Owner (capturas): "que esté hgcash por un lado, GH Wallet por otro; que se pueda elegir de
+  dónde salen los retiros pero que no se mezcle con los bancos (parecía que solo se elegía
+  desde GH Wallet); que para recibir transferencias se pueda elegir uno, los dos juntos o
+  separados".
+- **Sección "🏦 Bancos automáticos"** (nueva, arriba de los bancos): dos recuadros —
+  "📥 Recibir CARGAS por": solo hgcash / solo GH Wallet / los dos a la vez / ninguno; y
+  "💸 Pagar RETIROS por": hgcash / GH Wallet — un solo "Guardar bancos" + resumen de estado
+  de cada banco (recibe o no, modo, token, firma, PRUEBAS). `GET/POST /api/admin/banks`
+  escribe `hgcash.enabled`, `ghwallet.enabled` y `bankProvider`; rechaza activar un banco sin
+  lo mínimo (hgcash: nombre o CBU; GH Wallet: token y secreto).
+- **Bloque "🟡 hgcash"** (borde dorado): nombre, CBU, modo + ventana (la ventana vale para
+  los dos), "Guardar hgcash", credenciales y reenvío. **Bloque "🔵 GH Wallet"** (borde
+  celeste): modo, "Guardar GH Wallet", credenciales + cuenta/saldo. Los tildes "Activar
+  integración" / "Activar GH Wallet" y el radio de retiros que estaba dentro de GH Wallet se
+  ELIMINARON: eso vive solo en la sección general. Cada bloque muestra su línea de estado.
+- "Movimientos del banco": filtro nuevo por banco (los dos / hgcash / GH Wallet,
+  `?provider=` en `GET /api/admin/hgcash/movements`).
+- admin-sw v78. `node --check` OK, HTML balanceado. Solo front + 2 endpoints; **back necesita
+  deploy** (los endpoints nuevos).
+
 ### 332. GH WALLET — segundo banco con API, PARALELO a hgcash (elegible, config separada)
 - Owner: "quiero implementar lo que está en hgcash pero con otro banco, GH Wallet; que tenga la
   opción de elegir hgcash o GH Wallet y que se puedan cargar en paralelo, separado". Doc:
