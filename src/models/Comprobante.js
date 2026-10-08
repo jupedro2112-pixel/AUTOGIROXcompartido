@@ -26,6 +26,7 @@ const comprobanteSchema = new mongoose.Schema({
 
   // Datos extraídos del comprobante (los que la IA pudo leer)
   operationNumber: { type: String, default: null, trim: true },
+  coelsaCode: { type: String, default: null, trim: true }, // #339: "Código COELSA" (22 alfanuméricos), distinto del ID de operación
   amount: { type: Number, default: null },
   originHolder: { type: String, default: null, trim: true }, // titular / origen
   // #279: titular de origen NORMALIZADO (mayúsculas, sin acentos/puntuación) para

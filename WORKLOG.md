@@ -8,6 +8,26 @@
 
 ## Sesión 2026-10-08
 
+### 339. GH Wallet: el comprobante NO matcheaba (destino "GH Wallet" + coelsa vs ID de operación)
+- Caso real (owner, 19:30): movimiento GH $2.500 de "LOGISTICA ECKERDT FILMS S.A" (coelsa
+  `7L8GYKNX…`) + comprobante del cliente 1 min después con el mismo nombre, destino
+  "LOGISTICA FRANCISCANA SAS" y los DOS códigos (COELSA + "ID Operación" UUID) → "SIN CARGA
+  AUTOMÁTICA". Dos causas:
+  1. **Destino:** `_ghwalletMovementDoc` ponía `toName:'GH Wallet'` y GH no manda el destino,
+     así que `_destConsistentOk` comparaba "LOGISTICA FRANCISCANA SAS" contra "GH Wallet" (y
+     contra la cuenta de hgcash) → falso → el fallback por nombre de origen nunca entraba.
+     **Fix:** cache `_ghwalletAccountCache` (GET /account del token, refresco 1 h / al cambiar
+     credenciales); el movimiento guarda `toName`/`toCBU` reales y `_destConsistentOk` compara
+     con esa cuenta para `provider:'ghwallet'` (si la cache está vacía, acepta: el aviso ya
+     prueba que entró a nuestra cuenta).
+  2. **Código:** la IA tomaba el "ID Operación" (UUID) como `operationNumber`; el `coelsa_id`
+     de GH no coincidía. **Fix:** prompt pide `codigo_coelsa` aparte →
+     `Comprobante.coelsaCode`; `_comprobanteMatchesMovement` lo compara primero con
+     `movement.coelsaCode` (match definitivo), y después sigue lo de siempre.
+- Vale también para hgcash (un comprobante con COELSA ahora matchea por código aunque el
+  ID de operación sea otro). **Back necesita deploy.** El comprobante de la prueba (19:31) no
+  se re-evalúa solo: cargar a mano.
+
 ### 338. GH Wallet: opción "cargar AL INSTANTE con payment.paid" + descuento automático si GH revierte
 - Owner: "esos que quedan pendientes 5 minutos, el cliente no va a parar de quejarse. Cargar
   sin esperar la verificación y, si después falla, sacarle el saldo".

@@ -1059,6 +1059,8 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   #335. `Config['ghwallet'].chargeOn` = 'verified' | 'paid' (#338): con 'paid' se carga
   en `held` y una reversión posterior descuenta sola (`_autoDebitReversedGhwallet`,
   reference `vip-gwrev-<movementId>`, Transaction withdrawal, `/sys_gw_reversed`).
+  Destino de un movimiento GH = cuenta del token (`_ghwalletAccountCache`, GET /account);
+  el comprobante puede traer `coelsaCode` aparte del `operationNumber` y matchea por él (#339).
   Matcheo: un movimiento con `date` fuera de la ventana no es candidato aunque haya
   llegado recién — GH reenvía el histórico al cargar la URL —, y la ventana corta del lado
   movimiento se mide desde su primer aviso `held`, #336.)

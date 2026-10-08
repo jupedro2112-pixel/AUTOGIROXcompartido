@@ -2315,6 +2315,7 @@ async function analyzeComprobanteFromMessage({ userId, username, content, messag
       id: uuidv4(), userId, username, messageId,
       isComprobante: true, aiConfidence: result.confidence || 0,
       operationNumber: result.operationNumber || null,
+      coelsaCode: result.coelsaCode || null, // #339
       amount: result.amount, originHolder: result.originHolder || null,
       originHolderKey: _holderKey(result.originHolder), // #279
       originCbu: result.originCbu || null,
@@ -2525,6 +2526,17 @@ function _destConsistentOk(comprobante, movement, cfg) {
   if (movement) {
     if (comprobante.destCbu && movement.toCBU && _digits(comprobante.destCbu) === _digits(movement.toCBU)) return true;
     if (comprobante.destHolder && movement.toName && _nameMatch(comprobante.destHolder, movement.toName)) return true;
+    // #339: GH Wallet no manda el destino en el aviso; se compara con la cuenta del token
+    // (GET /account, cacheada). Si todavía no se pudo leer, el aviso ya prueba que la
+    // plata entró a NUESTRA cuenta de GH → se acepta.
+    if (movement.provider === 'ghwallet') {
+      const accs = _ghwalletAccountCache.accounts;
+      if (!accs || !accs.length) return true;
+      for (const a of accs) {
+        if (comprobante.destCbu && (a.cvu || a.cbu) && _digits(comprobante.destCbu) === _digits(a.cvu || a.cbu)) return true;
+        if (comprobante.destHolder && a.titular && _nameMatch(comprobante.destHolder, a.titular)) return true;
+      }
+    }
   }
   if (_comprobanteToOurBank(comprobante, cfg)) return true;
   return false;
@@ -2540,10 +2552,14 @@ function _comprobanteMatchesMovement(comprobante, movement, cfg) {
   if (!_amountsEqual(comprobante.amount, movement.amount)) return false;
 
   // (1) Match definitivo por número de transacción / coelsa.
+  // #339: el comprobante puede traer el "Código COELSA" aparte del ID de operación
+  // (GH Wallet manda el coelsa_id; los comprobantes bancarios muestran ambos).
+  const coelsa = _normComprobanteKey(movement.coelsaCode);
+  const ext = _normComprobanteKey(movement.externalId);
+  const compCoelsa = _normComprobanteKey(comprobante.coelsaCode);
+  if (compCoelsa && compCoelsa.length >= 6 && coelsa && coelsa === compCoelsa) return true;
   const opKey = _normComprobanteKey(comprobante.operationNumber);
   if (opKey && opKey.length >= 6) {
-    const coelsa = _normComprobanteKey(movement.coelsaCode);
-    const ext = _normComprobanteKey(movement.externalId);
     if (coelsa && coelsa === opKey) return true;
     if (ext && opKey.length >= 8 && ext.includes(opKey)) return true;
   }
@@ -3579,6 +3595,19 @@ function _hgcashWebhookSecrets() {
 // derivada de JWT_SECRET; panel > SSM (GHWALLET_API_TOKEN / GHWALLET_WEBHOOK_SECRET).
 let _ghwalletPanelSecret = null;
 let _ghwalletCredMeta = null;
+// #339: cuenta(s) de GH Wallet del token actual (titular / CVU / alias), para el destino
+// de los movimientos y la consistencia con el comprobante. Se refresca cada hora y
+// cuando cambian las credenciales.
+const _ghwalletAccountCache = { accounts: [], at: 0, tokenKey: null };
+async function _refreshGhwalletAccount(force) {
+  try {
+    if (!ghwallet.isEnabled()) { _ghwalletAccountCache.accounts = []; return; }
+    const tokenKey = String(ghwallet.getToken() || '').slice(-8);
+    if (!force && _ghwalletAccountCache.tokenKey === tokenKey && Date.now() - _ghwalletAccountCache.at < 60 * 60 * 1000) return;
+    const r = await ghwallet.getAccount();
+    if (r.ok) { _ghwalletAccountCache.accounts = r.accounts || []; _ghwalletAccountCache.at = Date.now(); _ghwalletAccountCache.tokenKey = tokenKey; }
+  } catch (_) {}
+}
 async function _loadGhwalletCredentials() {
   try {
     const v = await getConfig('ghwalletCredentials', null);
@@ -3596,6 +3625,8 @@ async function _loadGhwalletCredentials() {
 }
 setTimeout(() => { _loadGhwalletCredentials(); }, 9 * 1000);
 setInterval(() => { _loadGhwalletCredentials(); }, 60 * 1000);
+setTimeout(() => { _refreshGhwalletAccount(true); }, 15 * 1000);
+setInterval(() => { _refreshGhwalletAccount(false); }, 5 * 60 * 1000);
 function _ghwalletWebhookSecrets() {
   return [_ghwalletPanelSecret, process.env.GHWALLET_WEBHOOK_SECRET || null].filter(Boolean);
 }
@@ -3624,7 +3655,8 @@ function _ghwalletMovementDoc(event, d) {
     fromName: payer.payer_name || null,
     fromCBU: payer.payer_account || null,
     fromCUIT: payer.payer_cuit || null,
-    toName: 'GH Wallet',
+    toName: (_ghwalletAccountCache.accounts[0] && _ghwalletAccountCache.accounts[0].titular) || 'GH Wallet', // #339
+    toCBU: (_ghwalletAccountCache.accounts[0] && (_ghwalletAccountCache.accounts[0].cvu || _ghwalletAccountCache.accounts[0].cbu)) || null,
     date: d.paid_at ? new Date(d.paid_at) : null,
     topic: event,
     eventType: event,
@@ -18992,6 +19024,7 @@ app.get('/api/admin/ghwallet/credentials', authMiddleware, adminMiddleware, asyn
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
     await _loadGhwalletCredentials();
+    _refreshGhwalletAccount(true).catch(() => {});
     const m = _ghwalletCredMeta || {};
     res.json({
       tokenSource: ghwallet.getTokenSource(),
@@ -19025,6 +19058,7 @@ app.post('/api/admin/ghwallet/credentials', authMiddleware, adminMiddleware, asy
     if (secret) { next.secretEnc = _credEncrypt(secret); next.secretLast4 = secret.slice(-4); }
     await Config.set('ghwalletCredentials', next, req.user.username);
     await _loadGhwalletCredentials();
+    _refreshGhwalletAccount(true).catch(() => {});
     logger.info(`[ghwallet] credenciales del panel actualizadas por ${req.user.username} (${token ? 'token' : ''}${token && secret ? '+' : ''}${secret ? 'secreto' : ''})`);
     res.json({ success: true, accounts, test: ghwallet.isTestToken() });
   } catch (e) {
@@ -19037,6 +19071,7 @@ app.delete('/api/admin/ghwallet/credentials', authMiddleware, adminMiddleware, a
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
     await Config.deleteOne({ key: 'ghwalletCredentials' });
     await _loadGhwalletCredentials();
+    _refreshGhwalletAccount(true).catch(() => {});
     logger.info(`[ghwallet] credenciales del panel borradas por ${req.user.username} (vuelve a SSM)`);
     res.json({ success: true, tokenSource: ghwallet.getTokenSource() });
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }

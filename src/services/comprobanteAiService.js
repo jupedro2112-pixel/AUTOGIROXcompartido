@@ -67,6 +67,11 @@ const PROMPT = [
   '  (formato XX-XXXXXXXX-X, ej: 30-71876498-6) como número de operación — el CUIT identifica a',
   '  una persona/empresa y se REPITE entre transferencias distintas. Si el comprobante NO muestra',
   '  un número de operación/referencia claro y distinto del CUIT/CBU, poné null.',
+  '- codigo_coelsa: si el comprobante muestra un "Código COELSA" / "Coelsa ID" / "ID COELSA"',
+  '  (un código de 22 caracteres con letras y números, ej: 7L8GYKNX476O4MGQNMPRZ5), copialo',
+  '  EXACTO acá (string). Es distinto del "ID de operación" (que suele ser un UUID con',
+  '  guiones) — si hay los dos, numero_operacion = el ID de operación y codigo_coelsa = el',
+  '  código COELSA. Si no hay código COELSA, null.',
   '- monto: el importe transferido, sólo el número sin símbolos ni puntos de miles (number).',
   '- titular_origen: nombre del que envió el dinero (string).',
   '- cbu_origen: CBU/CVU o alias de la cuenta de ORIGEN (string).',
@@ -77,7 +82,7 @@ const PROMPT = [
   '',
   'Respondé ÚNICAMENTE con un objeto JSON válido, sin texto adicional, sin markdown, con',
   'exactamente estas claves:',
-  '{"es_comprobante": true|false, "confianza": 0..1, "numero_operacion": string|null,',
+  '{"es_comprobante": true|false, "confianza": 0..1, "numero_operacion": string|null, "codigo_coelsa": string|null,',
   ' "monto": number|null, "titular_origen": string|null, "cbu_origen": string|null,',
   ' "titular_destino": string|null, "cbu_destino": string|null,',
   ' "banco": string|null, "fecha": string|null}'
@@ -150,6 +155,7 @@ async function analyzeComprobante(content) {
       isComprobante: !!parsed.es_comprobante,
       confidence: typeof parsed.confianza === 'number' ? parsed.confianza : 0,
       operationNumber: parsed.numero_operacion ? String(parsed.numero_operacion).trim() : null,
+      coelsaCode: parsed.codigo_coelsa ? String(parsed.codigo_coelsa).trim() : null, // #339
       amount: amountNum,
       originHolder: parsed.titular_origen ? String(parsed.titular_origen).trim() : null,
       originCbu: parsed.cbu_origen ? String(parsed.cbu_origen).trim() : null,
