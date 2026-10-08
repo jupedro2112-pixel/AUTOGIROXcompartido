@@ -3697,7 +3697,7 @@ app.post('/api/ghwallet/webhook', async (req, res) => {
     const doc = _ghwalletMovementDoc(event, d);
     // Dedupe atómico por event + data.id: si este evento ya se procesó, no se repite.
     let isNew = false, fresh = null;
-    const existing = await BankMovement.findOne({ movementId: doc.movementId }).select('processedEvents matchStatus status').lean();
+    const existing = await BankMovement.findOne({ movementId: doc.movementId }).select('processedEvents matchStatus status eventType raw').lean();
     if (!existing) {
       try {
         await BankMovement.create({ ...doc, matchStatus: 'pending', processedEvents: [event], createdAt: new Date() });
@@ -3705,9 +3705,14 @@ app.post('/api/ghwallet/webhook', async (req, res) => {
       } catch (e) { if (!e || e.code !== 11000) throw e; }
     }
     if (!isNew) {
+      // #337: los avisos pueden llegar DESORDENADOS (verified antes que paid, sobre todo
+      // en el reenvío del histórico). Un 'paid' tardío NO baja un movimiento ya 'done'
+      // a 'held' — solo se anota el evento. 'reversed' siempre pisa.
+      const downgrade = existing && existing.status === 'done' && doc.status === 'held';
+      const setStatus = downgrade ? existing.status : doc.status;
       const claimed = await BankMovement.findOneAndUpdate(
         { movementId: doc.movementId, processedEvents: { $ne: event } },
-        { $set: { status: doc.status, eventType: event, topic: event, raw: d, fromName: doc.fromName, fromCBU: doc.fromCBU, fromCUIT: doc.fromCUIT, coelsaCode: doc.coelsaCode, externalId: doc.externalId }, $addToSet: { processedEvents: event } },
+        { $set: { status: setStatus, eventType: downgrade ? existing.eventType || event : event, topic: event, raw: downgrade ? (existing.raw || d) : d, fromName: doc.fromName, fromCBU: doc.fromCBU, fromCUIT: doc.fromCUIT, coelsaCode: doc.coelsaCode, externalId: doc.externalId }, $addToSet: { processedEvents: event } },
         { new: true }
       ).lean();
       if (!claimed) {
@@ -21799,6 +21804,48 @@ async function _pollPayingPayouts() {
 }
 setTimeout(function () { _pollPayingPayouts(); }, 90 * 1000);
 setInterval(function () { _pollPayingPayouts(); }, 45 * 1000);
+
+// #337: red de seguridad para cobros de GH Wallet que quedaron 'held' (en verificación)
+// porque el payment.verified no llegó o llegó antes que el paid: cada 5 min se consulta
+// el estado real en GH (GET /payments/{id}) y, si ya está verificado, se pasa a 'done'
+// y se matchea. Solo movimientos de las últimas 24 h con más de 5 min en espera.
+async function _pollHeldGhwalletPayments() {
+  try {
+    if (!ghwallet.isEnabled()) return;
+    const gw = await getGhwalletConfig();
+    if (!gw.enabled) return;
+    const held = await BankMovement.find({
+      provider: 'ghwallet', direction: 'Inbound', status: 'held', matchStatus: 'pending',
+      createdAt: { $gte: new Date(Date.now() - 24 * 3600 * 1000), $lte: new Date(Date.now() - 5 * 60 * 1000) }
+    }).sort({ createdAt: -1 }).limit(20).lean();
+    for (const m of held) {
+      const id = String(m.movementId || '').replace(/^gw:/, '');
+      if (!id) continue;
+      const r = await ghwallet.getPayment(id);
+      if (!r.ok || !r.data) continue;
+      const d = r.data;
+      const vs = String(d.verify_state || d.verification_state || '').toLowerCase();
+      const st = String(d.status || d.estado || '').toLowerCase();
+      if (st === 'reversed' || st === 'revertido' || vs === 'reversed') {
+        await BankMovement.updateOne({ movementId: m.movementId }, { $set: { status: 'reversed', matchStatus: 'ignored', chargeError: 'reversed por GH Wallet (consulta)' }, $addToSet: { processedEvents: 'poll.reversed' } });
+        continue;
+      }
+      const verified = vs === 'verified' || vs === 'verificado' || st === 'verified' || st === 'verificado' || d.verified === true || d.verified_at;
+      if (!verified) continue;
+      const upd = await BankMovement.findOneAndUpdate(
+        { movementId: m.movementId, status: 'held' },
+        { $set: { status: 'done', eventType: 'payment.verified', topic: 'poll.verified' }, $addToSet: { processedEvents: 'poll.verified' } },
+        { new: true }
+      ).lean();
+      if (!upd) continue;
+      logger.info(`[ghwallet] cobro ${id} verificado por consulta (el webhook no lo había marcado) — se matchea`);
+      _emitHgcashUpdate('movimiento');
+      hgcashMatchFromMovement(upd).catch(() => {});
+    }
+  } catch (e) { logger.warn(`[ghwallet] poll de cobros held falló: ${e.message}`); }
+}
+setTimeout(function () { _pollHeldGhwalletPayments(); }, 90 * 1000);
+setInterval(function () { _pollHeldGhwalletPayments(); }, 5 * 60 * 1000);
 
 // ============================================================
 // BARRIDO DE COMPROBANTES COLGADOS (owner 2026-08-26)

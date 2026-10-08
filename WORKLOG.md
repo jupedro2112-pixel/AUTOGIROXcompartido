@@ -8,6 +8,21 @@
 
 ## Sesión 2026-10-08
 
+### 337. GH Wallet: cobros que quedaban "en verificación" para siempre (avisos desordenados) + poll de respaldo
+- Owner: la mayoría de los cobros entran como verificados, pero algunos quedan con ⏳ "en
+  verificación" aunque en GH ya están firmes.
+- **Causa:** los avisos de GH pueden llegar desordenados (`payment.verified` antes que
+  `payment.paid`, sobre todo en el reenvío del histórico). El handler aplicaba el status del
+  evento que llegaba, así que un `paid` tardío bajaba el movimiento de `done` a `held`, y como
+  cada evento se procesa una sola vez, nunca volvía a subir. **Fix:** un `paid` sobre un
+  movimiento ya `done` solo se anota en `processedEvents`; no toca status/raw. `reversed`
+  siempre pisa.
+- **Respaldo:** cron `_pollHeldGhwalletPayments` (cada 5 min, por instancia; idempotente por
+  `status:'held'` en el update): movimientos GH `held` de las últimas 24 h con >5 min en
+  espera → `GET /payments/{id}`; si GH los da por verificados (`verify_state`/`status`
+  verified) pasan a `done` y se matchean; si están revertidos, `reversed` + `ignored`. Cubre
+  también el caso de que el `payment.verified` nunca llegue. **Back necesita deploy.**
+
 ### 336. GH Wallet: al cargar la URL del webhook reenvió el HISTÓRICO del día + ventana del matcheo con verificación demorada
 - Owner cargó la dirección de avisos en GH Wallet (la clave real no la tenía: #335) y
   entraron de golpe 12 movimientos "Pendiente" a las 19:06/19:08: eran las transferencias de

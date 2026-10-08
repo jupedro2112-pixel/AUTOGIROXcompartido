@@ -1092,6 +1092,7 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 | `_runFcmPrune` | 24 h | activo | flag anti-overlap en memoria |
 | `fbAdsWebhook.startWorker` | 5 min | activo | nextRetryAt |
 | `outboundWebhook.startWorker` (#334) | 5 min | activo | nextRetryAt; `event_id` estable → el receptor deduplica |
+| `_pollHeldGhwalletPayments` (#337) | 5 min | activo | update condicionado a `status:'held'`; consulta `GET /payments/{id}` de GH para cobros en espera >5 min |
 | Limpieza mensajes >3d | 6 h | activo (red de seguridad del TTL) | deleteMany |
 | `_processNotifBatchQueue` (lotes con regalo) | 45 s + kick al crear | activo | claim atómico por destinatario (`delivery:null → 'sending'`), reference `vip-nbatch-*` |
 | `_expireDailyRoulettePct` | 15 min (+ lazy en claim/status) | activo — vence el % EXTRA de la ruleta diaria a las 24 h (#305) | update condicional, idempotente |
