@@ -8,6 +8,21 @@
 
 ## Sesión 2026-10-08
 
+### 336. GH Wallet: al cargar la URL del webhook reenvió el HISTÓRICO del día + ventana del matcheo con verificación demorada
+- Owner cargó la dirección de avisos en GH Wallet (la clave real no la tenía: #335) y
+  entraron de golpe 12 movimientos "Pendiente" a las 19:06/19:08: eran las transferencias de
+  18:15-18:40 que GH reenvió al configurar el webhook (ya cargadas a mano). Quedaron
+  Pendiente porque no había comprobantes en la ventana corta → correcto, NO se duplicó nada.
+- **Fix 1 (anti-replay):** `hgcashMatchFromComprobante` ignora movimientos cuya fecha real
+  (`BankMovement.date` = `paid_at` del banco) sea anterior a la ventana aunque hayan llegado
+  recién. Antes un comprobante tardío podía matchear una transferencia vieja ya cargada a mano.
+- **Fix 2 (verificación demorada):** en `hgcashMatchFromMovement` la ventana corta
+  (`raceWindowMinutes`, 10 min) se mide desde que el movimiento ENTRÓ por primera vez (como
+  `held`), no desde el `payment.verified`. Antes, si GH tardaba >10 min en verificar, el
+  comprobante enviado al transferir quedaba fuera de la ventana y la carga no salía sola.
+- Panel: la columna FECHA muestra la fecha de la transferencia según el banco (`date`) y, si
+  el aviso llegó >15 min después, "avisó +N min". admin-sw v81. **Back necesita deploy.**
+
 ### 335. GH Wallet: diagnóstico "¿Llegan los avisos?" (primera carga real no apareció)
 - Owner transfirió $5.000 reales a la cuenta de GH Wallet (figura en GH como Cobro 18:40) y
   en el panel "Movimientos del banco → GH Wallet" quedó vacío: el webhook NO llegó al server

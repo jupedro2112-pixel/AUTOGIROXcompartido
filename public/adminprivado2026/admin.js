@@ -6825,7 +6825,10 @@ async function loadHgcashMovements(page = 1) {
             return;
         }
         body.innerHTML = movs.map(m => {
-            const fecha = m.createdAt ? fmtFechaHoraAR(m.createdAt) : '—';
+            // #336: fecha de la transferencia según el banco; si llegó mucho después (reenvío), se aclara.
+            const fecha = (m.date || m.createdAt) ? fmtFechaHoraAR(m.date || m.createdAt) : '—';
+            const lateMin = m.date && m.createdAt ? Math.round((new Date(m.createdAt) - new Date(m.date)) / 60000) : 0;
+            const fechaExtra = lateMin > 15 ? '<br><small style="color:#ffb74d;" title="El banco avisó ' + lateMin + ' min después de la transferencia">avisó +' + lateMin + ' min</small>' : '';
             const dir = (m.direction === 'Inbound' ? '⬇️ Entra' : (m.direction === 'Outbound' ? '⬆️ Sale' : '—')) +
                 (m.provider === 'ghwallet' ? ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(100,181,246,0.2);color:#64b5f6;font-weight:800;" title="GH Wallet">GH</span>' : '') +
                 (m.provider === 'ghwallet' && m.status === 'held' ? ' <span style="font-size:10px;color:#ffb74d;" title="GH Wallet todavía no la dio por firme (payment.verified)">⏳ en verificación</span>' : '') +
@@ -6839,7 +6842,7 @@ async function loadHgcashMovements(page = 1) {
             const usuario = m.matchedUsername ? '@' + m.matchedUsername : (m.payoutUsername ? '@' + m.payoutUsername : '—');
             const op = m.coelsaCode || m.externalId || '—';
             return '<tr>' +
-                '<td style="white-space:nowrap;">' + escapeHtml(fecha) + '</td>' +
+                '<td style="white-space:nowrap;">' + escapeHtml(fecha) + fechaExtra + '</td>' +
                 '<td>' + dir + '</td>' +
                 '<td style="white-space:nowrap;">' + escapeHtml(monto) + '</td>' +
                 '<td>' + escapeHtml(origen) + '</td>' +

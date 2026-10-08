@@ -1055,6 +1055,9 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   (registro y primera_carga siempre; carga y retiro opcionales) y datos opcionales
   (atribución, mail/teléfono). `GET/POST /api/admin/webhooks`, `DELETE /:id`, `POST /:id/test`.
   (Diagnóstico de los avisos ENTRANTES de GH Wallet: `GET /api/admin/ghwallet/webhooks`,
+  #335. Matcheo: un movimiento con `date` fuera de la ventana no es candidato aunque haya
+  llegado recién — GH reenvía el histórico al cargar la URL —, y la ventana corta del lado
+  movimiento se mide desde su primer aviso `held`, #336.)
   botón "¿Llegan los avisos?" en el bloque GH Wallet, #335.)
   Servicio `src/services/outboundWebhookService.js` (firma HMAC-SHA256 de `"{ts}.{body}"`,
   headers `X-Webhook-*`, 3 reintentos + cola). Los enganches están junto a cada

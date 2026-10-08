@@ -3232,8 +3232,12 @@ async function hgcashMatchFromMovement(movement) {
     if (cfg.currency && movement.currency && String(movement.currency).toUpperCase() !== String(cfg.currency).toUpperCase()) return;
 
     // Ventana CORTA: solo comprobantes enviados en los últimos raceWindowMinutes.
+    // #336: si el movimiento ya existía como 'held' (GH Wallet: paid → verified tarda
+    // minutos), la ventana se mide desde que ENTRÓ el movimiento, no desde ahora: el
+    // comprobante que el cliente mandó mientras GH verificaba sigue siendo candidato.
     const raceMin = Math.min(cfg.windowMinutes || 60, cfg.raceWindowMinutes || 10);
-    const since = new Date(Date.now() - raceMin * 60 * 1000);
+    const firstSeen = movement.createdAt ? new Date(movement.createdAt).getTime() : Date.now();
+    const since = new Date(Math.min(Date.now(), firstSeen) - raceMin * 60 * 1000);
     const candidates = await Comprobante.find({
       isComprobante: true,
       autoCharged: { $ne: true },
@@ -3279,8 +3283,12 @@ async function hgcashMatchFromComprobante(comprobante) {
     // o por nombre de origen + destino). NO dependemos de la config de cuenta: el
     // match se valida contra el movimiento real (sirve para cualquier banco/cuenta).
     const since = new Date(Date.now() - (cfg.windowMinutes || 60) * 60 * 1000);
+    // #336: `date` = cuándo se hizo la transferencia según el banco. Un movimiento que
+    // llegó recién pero es VIEJO (GH Wallet reenvía el histórico al cargar la URL del
+    // webhook) no es candidato: esa plata ya se cargó a mano en su momento.
     const candidates = await BankMovement.find({
-      direction: 'Inbound', matchStatus: 'pending', createdAt: { $gte: since }
+      direction: 'Inbound', matchStatus: 'pending', createdAt: { $gte: since },
+      $or: [{ date: null }, { date: { $exists: false } }, { date: { $gte: since } }]
     }).sort({ createdAt: -1 }).limit(80).lean();
 
     // #332: cada movimiento se evalúa con la config de SU banco (un banco apagado
