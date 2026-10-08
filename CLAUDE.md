@@ -75,7 +75,9 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   `zamuxavier`, dominio auto1girox.com).
 - `src/models/` — schemas Mongoose canónicos (fuente de verdad).
 - `src/services/` — lógica (referidos, notificaciones, otp, metaCapi, fbAds, hgcash,
-  comprobantes IA, analítica publicistas…).
+  ghwallet, comprobantes IA, analítica publicistas…). `outboundWebhookService.js` (#334) =
+  webhooks salientes a publicistas configurados desde el panel (`Config['outboundWebhooks']`);
+  `fbAdsWebhookService.js` es el viejo destino único por SSM (no agregarle features).
 - `public/` — PWA del cliente (namespace global `window.VIP`, SW único
   `firebase-messaging-sw.js`). `public/adminprivado2026/` — panel admin (~14k líneas
   de admin.js, cookie httpOnly; su SW es `public/admin-sw.js`, scope /adminprivado2026/).

@@ -5,8 +5,9 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-07** — GH Wallet, banco con API paralelo a hgcash (#332: §2
-> BankMovement, §5 flujo, §9). Antes: cashback instantáneo retirado (#329, §5).
+> Última actualización: **2026-10-08** — webhooks salientes a publicistas (#334: §2
+> OutboundWebhookQueue, §5 flujo, §6 card, §9 cron). Antes (2026-10-07): GH Wallet, banco con
+> API paralelo a hgcash (#332: §2 BankMovement, §5 flujo, §9). Antes: cashback instantáneo retirado (#329, §5).
 > Antes ese mismo día: reenvío de webhooks hgcash desde el panel (#326, §5).
 > Antes ese mismo día: tope del bono de bienvenida para cualquier % (#324, §5).
 > Antes ese mismo día: trampas del entorno EB clonado (#323, §9).
@@ -275,6 +276,8 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   de "Datos" (métricas del período) y de publisherAnalytics (por publicista).
 - **Review** (1 por user, moderada), **OtpCode** (TTL 5 min, hash bcrypt, 3 intentos),
   **FbAdsWebhookQueue** (cola de reintentos al sistema externo fb-ads),
+  **OutboundWebhookQueue** (#334: cola de reintentos de los webhooks salientes a publicistas;
+  `destId` + payload firmado tal cual, `nextRetryAt`),
   **RefundClaim** (índice único userId+type+periodKey contra doble cobro),
   **FireStreak** (racha fueguito + premios pendientes), **Config** (key/value: cbu,
   hgcash, refundPercents, fireMilestones, flags de migración one-shot, etc.),
@@ -1046,6 +1049,15 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   loguea: consulta un jugador inexistente — 404 = key válida, 401 = key rechazada.
 - `public/admin-sw.js` (scope /adminprivado2026/, servido por un handler propio; versión
   actual en su `CACHE_VERSION`): network-first no-store para el shell.
+- **Card "🔗 Webhooks salientes"** (#334, Configuración, solo admin general): destinos en
+  `Config['outboundWebhooks']` (secreto cifrado como las credenciales de hgcash). Por destino:
+  URL https, alcance TODOS o lista de publicistas (`metaCapi.resolveEventScope`), eventos
+  (registro y primera_carga siempre; carga y retiro opcionales) y datos opcionales
+  (atribución, mail/teléfono). `GET/POST /api/admin/webhooks`, `DELETE /:id`, `POST /:id/test`.
+  Servicio `src/services/outboundWebhookService.js` (firma HMAC-SHA256 de `"{ts}.{body}"`,
+  headers `X-Webhook-*`, 3 reintentos + cola). Los enganches están junto a cada
+  `fbAdsWebhook.notify` (registro ×3, carga acreditada ×3, `notifyPayoutPaid`). El pixel de Meta
+  sigue en paralelo, sin cambios.
 - **Sección "🏦 Bancos automáticos"** (#333): elige por cuál(es) banco entran las cargas
   (uno / los dos / ninguno → `hgcash.enabled` + `ghwallet.enabled`) y por cuál salen los
   retiros (`bankProvider`) vía `GET/POST /api/admin/banks`; abajo, un bloque por banco
@@ -1074,6 +1086,7 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 | `_runVipSweepCheck` (sweep VIP) | 1 h (corre a las 05 ART) | activo | claim atómico por día en Config (`vip_sweep_day`) → instancia única |
 | `_runFcmPrune` | 24 h | activo | flag anti-overlap en memoria |
 | `fbAdsWebhook.startWorker` | 5 min | activo | nextRetryAt |
+| `outboundWebhook.startWorker` (#334) | 5 min | activo | nextRetryAt; `event_id` estable → el receptor deduplica |
 | Limpieza mensajes >3d | 6 h | activo (red de seguridad del TTL) | deleteMany |
 | `_processNotifBatchQueue` (lotes con regalo) | 45 s + kick al crear | activo | claim atómico por destinatario (`delivery:null → 'sending'`), reference `vip-nbatch-*` |
 | `_expireDailyRoulettePct` | 15 min (+ lazy en claim/status) | activo — vence el % EXTRA de la ruleta diaria a las 24 h (#305) | update condicional, idempotente |

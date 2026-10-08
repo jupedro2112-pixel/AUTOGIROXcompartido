@@ -648,6 +648,15 @@ const publisherAnalytics = require('./src/services/publisherAnalyticsService');
 const refunds = require('./models/refunds');
 const metaCapi = require('./src/services/metaCapiService');
 const fbAdsWebhook = require('./src/services/fbAdsWebhookService');
+// #334: webhooks salientes configurables desde el panel (registro / primera carga /
+// carga / retiro) a uno, varios o todos los publicistas. En PARALELO al pixel de Meta.
+const outboundWebhook = require('./src/services/outboundWebhookService');
+const OutboundWebhookQueue = require('./src/models/OutboundWebhookQueue');
+outboundWebhook.configure({
+  getDestinations: () => _getOutboundWebhooks(),
+  resolveScope: (userInfo, opts) => metaCapi.resolveEventScope(userInfo, opts),
+  publicBaseUrl: () => getPublicBaseUrl()
+});
 
 // ¿Es la PRIMERA carga real del cliente (FTD)? Se llama DESPUÉS de crear el
 // Transaction del depósito, así que la primera carga = exactamente 1 depósito
@@ -2681,6 +2690,8 @@ async function ensureHgcashAccountIdSaved(accountId) {
 // Avisa al cliente (y a los admins) que su retiro fue pagado. El texto es editable
 // desde COMANDOS (/sys_payout_paid); si se vacía ese comando, no se envía nada.
 async function notifyPayoutPaid(payout) {
+  // #334: aviso saliente 'retiro' (solo a los destinos que lo pidieron).
+  try { if (payout && payout.userId) outboundWebhook.notify('retiro', { id: payout.userId }, { amount: Number(payout.amount), payoutId: payout.id, occurredAt: payout.paidAt || new Date() }); } catch (_) {}
   try {
     const content = await renderSystemCommand(
       '/sys_payout_paid',
@@ -3136,6 +3147,7 @@ async function hgcashAutoCarga({ movement, comprobante, mode }) {
         { firstDeposit: _hgFTD, eventSourceUrl: user.landingUrl || undefined }
       );
       fbAdsWebhook.notify('Purchase', user, { value: Number(amount), currency: 'ARS' });
+      outboundWebhook.notify('carga', user, { amount: Number(amount), firstDeposit: _hgFTD, transactionId: _hgDepTx && _hgDepTx.id }); // #334
     } catch (_) {}
 
     // Mensaje al cliente (usa /sys_deposit si está; si no, fallback).
@@ -3364,6 +3376,64 @@ function _normalizeFanoutUrl(raw) {
   p.hash = '';
   return p.toString();
 }
+// ===== #334 Webhooks salientes (Config['outboundWebhooks']) =====
+// Lista de destinos; el secreto se guarda cifrado (misma clave que las credenciales
+// de hgcash, #320) y se descifra sólo en memoria para firmar.
+const OUTBOUND_WEBHOOKS_KEY = 'outboundWebhooks';
+const OUTBOUND_WEBHOOKS_MAX = 10;
+const OUTBOUND_WEBHOOKS_TTL_MS = 60 * 1000;
+let _outboundWebhooksCache = null;
+function _normalizeOutboundDest(d, cur) {
+  const c = cur || {};
+  const events = d.events && typeof d.events === 'object' ? d.events : (c.events || {});
+  const fields = d.fields && typeof d.fields === 'object' ? d.fields : (c.fields || {});
+  const url = d.url !== undefined ? String(d.url || '').trim() : (c.url || '');
+  return {
+    id: c.id || d.id || ('wh_' + crypto.randomBytes(5).toString('hex')),
+    name: d.name !== undefined ? String(d.name || '').trim().slice(0, 60) : (c.name || ''),
+    url,
+    secretEnc: (typeof d.secret === 'string' && d.secret.trim()) ? _credEncrypt(d.secret.trim()) : (c.secretEnc || null),
+    enabled: typeof d.enabled === 'boolean' ? d.enabled : (c.enabled !== false),
+    scope: d.scope === 'publishers' ? 'publishers' : (d.scope === 'all' ? 'all' : (c.scope || 'all')),
+    publishers: Array.isArray(d.publishers) ? d.publishers.map((p) => String(p || '').trim()).filter(Boolean).slice(0, 50) : (c.publishers || []),
+    events: {
+      registro: events.registro !== false,           // siempre por defecto
+      primera_carga: events.primera_carga !== false, // siempre por defecto
+      carga: events.carga === true,                  // OPCIONAL
+      retiro: events.retiro === true                 // OPCIONAL
+    },
+    fields: { atribucion: fields.atribucion === true, contacto: fields.contacto === true }, // OPCIONALES
+    createdAt: c.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+async function _getOutboundWebhooks(opts) {
+  const now = Date.now();
+  if (!(opts && opts.fresh) && _outboundWebhooksCache && (now - _outboundWebhooksCache.at) < OUTBOUND_WEBHOOKS_TTL_MS) return _outboundWebhooksCache.value;
+  const raw = await getConfig(OUTBOUND_WEBHOOKS_KEY, null);
+  const list = raw && Array.isArray(raw.destinations) ? raw.destinations : [];
+  const value = list.map((d) => {
+    let secret = null, decryptError = false;
+    if (d.secretEnc) { try { secret = _credDecrypt(d.secretEnc); } catch (_) { decryptError = true; } }
+    return Object.assign({}, d, { secret, decryptError });
+  });
+  _outboundWebhooksCache = { at: now, value };
+  return value;
+}
+async function _saveOutboundWebhooks(list, by) {
+  const clean = list.map((d) => { const o = Object.assign({}, d); delete o.secret; delete o.decryptError; return o; });
+  await Config.set(OUTBOUND_WEBHOOKS_KEY, { destinations: clean }, by);
+  _outboundWebhooksCache = null;
+}
+function _outboundDestPublic(d, stats, pending) {
+  const o = Object.assign({}, d);
+  delete o.secretEnc; delete o.secret;
+  o.hasSecret = !!d.secretEnc;
+  o.stats = stats || null;
+  o.pending = pending || 0;
+  return o;
+}
+
 async function _getHgcashFanout(opts) {
   const now = Date.now();
   if (!(opts && opts.fresh) && _hgcashFanoutCache && (now - _hgcashFanoutCache.at) < HGCASH_FANOUT_TTL_MS) {
@@ -4748,6 +4818,7 @@ app.post('/api/auth/register', authLimiter, registerIpLimiter, async (req, res) 
 
     // Webhook a fb-ads: conversión clave del embudo. Fire-and-forget.
     fbAdsWebhook.notify('CompleteRegistration', newUser);
+    outboundWebhook.notify('registro', newUser); // #334
 
     res.status(201).json({
       message: 'Usuario creado exitosamente',
@@ -4926,6 +4997,7 @@ app.post('/api/auth/register-quick', authLimiter, registerIpLimiter, async (req,
 
     // Webhook a fb-ads: conversión clave del embudo. Fire-and-forget.
     fbAdsWebhook.notify('CompleteRegistration', newUser);
+    outboundWebhook.notify('registro', newUser); // #334
 
     res.status(201).json({
       message: 'Cuenta creada. Ya podes ingresar a jugar — para retirar tendrás que verificar un teléfono.',
@@ -5133,6 +5205,7 @@ app.post('/api/landing/signup', landingIpLimiter, async (req, res) => {
       { req, eventId: 'reg_' + newUser.id, publisher: campaign.publisher, campaignCode: normalizedCode }
     );
     try { fbAdsWebhook.notify('CompleteRegistration', newUser); } catch (_) {}
+    try { outboundWebhook.notify('registro', newUser); } catch (_) {} // #334
 
     // 3) Link de acceso de un solo uso → el cliente entra logueado a chat1girox.
     //    `ir=casino`: la PWA, apenas loguea, abre el casino DIRECTO (flujo pedido
@@ -10520,6 +10593,7 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
 
       // Webhook a fb-ads: conversión Purchase para aprendizaje por anuncio.
       fbAdsWebhook.notify('Purchase', user, { value: parseFloat(amount), currency: 'ARS' });
+      outboundWebhook.notify('carga', user, { amount: parseFloat(amount), firstDeposit: _isFTD, transactionId: _depTxId }); // #334
 
       logger.info(
         `[deposit] OK admin=${req.user?.username} user=${user.username} amount=$${amount} ` +
@@ -12295,6 +12369,7 @@ app.post('/api/movements/deposit', authMiddleware, depositorMiddleware, async (r
         );
         // Webhook a fb-ads: conversión Purchase para aprendizaje por anuncio.
         fbAdsWebhook.notify('Purchase', u, { value: parseFloat(amount), currency: 'ARS' });
+        outboundWebhook.notify('carga', u, { amount: parseFloat(amount), firstDeposit: _isFTD, transactionId: _selfDepTxId }); // #334
       } catch (e) { /* tracking nunca bloquea */ }
 
       res.json({
@@ -18708,6 +18783,60 @@ async function _banksPayload() {
     ghwallet: { enabled: gw.enabled, mode: gw.mode, token: ghwallet.getTokenSource(), secret: _ghwalletWebhookSecrets().length > 0, test: ghwallet.isTestToken() }
   };
 }
+// #334 Webhooks salientes — CRUD desde el panel (solo admin general).
+app.get('/api/admin/webhooks', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const list = await _getOutboundWebhooks({ fresh: true });
+    const out = [];
+    for (const d of list) out.push(_outboundDestPublic(d, outboundWebhook.getStats(d.id), await outboundWebhook.pendingCount(d.id)));
+    let publishers = [];
+    try { publishers = (await Campaign.distinct('publisher')).map((p) => String(p || '').trim()).filter(Boolean).sort(); } catch (_) {}
+    res.json({ destinations: out, publishers, max: OUTBOUND_WEBHOOKS_MAX });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/webhooks', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const b = req.body || {};
+    const list = await _getOutboundWebhooks({ fresh: true });
+    const idx = b.id ? list.findIndex((d) => d.id === b.id) : -1;
+    const cur = idx >= 0 ? list[idx] : null;
+    if (!cur && list.length >= OUTBOUND_WEBHOOKS_MAX) return res.status(400).json({ error: `Máximo ${OUTBOUND_WEBHOOKS_MAX} destinos` });
+    const next = _normalizeOutboundDest(b, cur);
+    if (!/^https:\/\/[^\s]+$/i.test(next.url)) return res.status(400).json({ error: 'La URL tiene que empezar con https://' });
+    if (!next.name) return res.status(400).json({ error: 'Poné un nombre (ej: el publicista o el sistema que recibe)' });
+    if (!next.secretEnc) return res.status(400).json({ error: 'Falta el secreto: con él el receptor comprueba que el aviso es tuyo' });
+    if (next.scope === 'publishers' && !next.publishers.length) return res.status(400).json({ error: 'Elegí al menos un publicista, o marcá TODOS' });
+    if (idx >= 0) list[idx] = next; else list.push(next);
+    await _saveOutboundWebhooks(list, req.user.username);
+    logger.info(`[webhooks] ${req.user.username} ${cur ? 'editó' : 'creó'} destino ${next.name} (${next.id}) scope=${next.scope}`);
+    res.json({ success: true, destination: _outboundDestPublic(next) });
+  } catch (e) { logger.error(`[webhooks] guardar: ${e.message}`); res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.delete('/api/admin/webhooks/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const list = await _getOutboundWebhooks({ fresh: true });
+    const next = list.filter((d) => d.id !== req.params.id);
+    if (next.length === list.length) return res.status(404).json({ error: 'No existe' });
+    await _saveOutboundWebhooks(next, req.user.username);
+    try { await OutboundWebhookQueue.deleteMany({ destId: req.params.id }); } catch (_) {}
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/webhooks/:id/test', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const list = await _getOutboundWebhooks({ fresh: true });
+    const d = list.find((x) => x.id === req.params.id);
+    if (!d) return res.status(404).json({ error: 'No existe' });
+    if (d.decryptError) return res.status(400).json({ error: 'El secreto guardado no se pudo leer (¿cambió JWT_SECRET?). Volvé a cargarlo.' });
+    const r = await outboundWebhook.sendTest(d);
+    res.json({ ok: r.ok, status: r.status || null, error: r.error || null, payload: r.payload });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+
 app.get('/api/admin/banks', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
@@ -24434,6 +24563,7 @@ if (process.env.VERCEL) {
     logger.info('Data initialized for Vercel');
     // Worker periódico que reprocesa la cola de webhooks a fb-ads.
     fbAdsWebhook.startWorker();
+    outboundWebhook.startWorker(); // #334
   });
   
   module.exports = app;
@@ -24498,6 +24628,7 @@ if (process.env.VERCEL) {
     await setupRedisAdapter();
     // Worker periódico que reprocesa la cola de webhooks a fb-ads.
     fbAdsWebhook.startWorker();
+    outboundWebhook.startWorker(); // #334
     server.listen(PORT, () => {
       logger.info(`Server started on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
     });

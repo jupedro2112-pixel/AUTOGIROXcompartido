@@ -525,6 +525,133 @@ async function saveUsernamePrefix() {
 }
 window.usernamePrefixPreview = usernamePrefixPreview; window.saveUsernamePrefix = saveUsernamePrefix; window.loadUsernamePrefixCard = loadUsernamePrefixCard;
 
+// ====== #334 WEBHOOKS SALIENTES (Configuración, solo admin general) ======
+let _whDests = [];
+let _whPublishers = [];
+function _whEvTxt(d) {
+    const ev = d.events || {}; const out = ['registro', 'primera carga'];
+    if (ev.carga) out.push('cargas'); if (ev.retiro) out.push('retiros');
+    return out.join(' · ');
+}
+function _whRenderList() {
+    const box = document.getElementById('webhooksList'); if (!box) return;
+    if (!_whDests.length) { box.innerHTML = '<span style="color:#aaa;font-size:12px;">Todavía no hay destinos. Agregá uno con "+ Nuevo destino".</span>'; return; }
+    box.innerHTML = _whDests.map(function (d) {
+        const st = d.stats;
+        const scope = d.scope === 'publishers' ? '👥 ' + escapeHtml((d.publishers || []).join(', ')) : '👥 <b>TODOS</b>';
+        const extra = [d.fields && d.fields.atribucion ? 'atribución' : null, d.fields && d.fields.contacto ? 'mail/tel' : null].filter(Boolean).join(' + ');
+        let last = '';
+        if (st && st.lastAt) last = (st.lastOk ? '<span style="color:#66ff99;">✅ último OK</span>' : '<span style="color:#ff8080;">❌ ' + escapeHtml(st.lastError || 'falló') + '</span>') + ' (' + escapeHtml(st.lastEvent || '') + ', ' + fmtFechaHoraAR(st.lastAt) + ') · ' + st.ok + ' ok / ' + st.fail + ' fallos desde el arranque';
+        if (d.pending) last += ' · <span style="color:#ffb74d;">' + d.pending + ' en cola</span>';
+        if (d.decryptError) last += ' · <span style="color:#ff8080;">⚠️ secreto ilegible (¿cambió JWT_SECRET?): volvé a cargarlo</span>';
+        return '<div style="padding:10px;border-radius:8px;background:rgba(255,255,255,0.04);border-left:4px solid ' + (d.enabled ? '#66ff99' : '#777') + ';font-size:12px;line-height:1.6;">' +
+            '<div><b>' + escapeHtml(d.name || '(sin nombre)') + '</b> ' + (d.enabled ? '' : '<span style="color:#aaa;">(apagado)</span>') + ' · <code style="font-size:11px;">' + escapeHtml(d.url) + '</code></div>' +
+            '<div>' + scope + ' · 📨 ' + _whEvTxt(d) + (extra ? ' · 🧩 ' + extra : '') + '</div>' +
+            (last ? '<div style="color:#aaa;">' + last + '</div>' : '') +
+            '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">' +
+            '<button type="button" class="btn-secondary btn-small" onclick="webhookEdit(\'' + d.id + '\')">✏️ Editar</button>' +
+            '<button type="button" class="btn-secondary btn-small" onclick="webhookTest(\'' + d.id + '\')">📤 Enviar prueba</button>' +
+            '<button type="button" class="btn-secondary btn-small" onclick="webhookDelete(\'' + d.id + '\')" style="color:#ff8080;">🗑 Borrar</button>' +
+            '</div></div>';
+    }).join('');
+}
+async function loadWebhooksCard() {
+    const form = document.getElementById('webhooksForm'); const header = document.getElementById('webhooksHeader');
+    try {
+        const r = await authFetch('/api/admin/webhooks');
+        if (!r.ok) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; return; }
+        if (form) form.style.display = ''; if (header) header.style.display = '';
+        const j = await r.json();
+        _whDests = j.destinations || []; _whPublishers = j.publishers || [];
+        _whRenderList();
+    } catch (_) {}
+}
+function _whRenderPublishers(selected) {
+    const box = document.getElementById('whPublishers'); if (!box) return;
+    const sel = (selected || []).map(function (x) { return String(x).toLowerCase(); });
+    if (!_whPublishers.length) { box.innerHTML = '<span style="color:#aaa;">No hay campañas con publicista todavía (creá una en PUBLICISTAS Y PAUTAS).</span>'; return; }
+    box.innerHTML = _whPublishers.map(function (pub) {
+        return '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" class="whPub" value="' + escapeHtml(pub) + '" style="width:auto;"' + (sel.indexOf(pub.toLowerCase()) >= 0 ? ' checked' : '') + '> ' + escapeHtml(pub) + '</label>';
+    }).join('');
+}
+function webhookScopeChanged() {
+    const pubs = document.querySelector('input[name="whScope"]:checked');
+    const box = document.getElementById('whPublishers');
+    if (box) box.style.opacity = pubs && pubs.value === 'publishers' ? '1' : '0.45';
+}
+function webhookEdit(id) {
+    const d = id ? _whDests.find(function (x) { return x.id === id; }) : null;
+    const ed = document.getElementById('webhookEditor'); if (!ed) return;
+    document.getElementById('whId').value = d ? d.id : '';
+    document.getElementById('whName').value = d ? (d.name || '') : '';
+    document.getElementById('whUrl').value = d ? (d.url || '') : '';
+    document.getElementById('whSecret').value = '';
+    document.getElementById('whSecret').placeholder = d && d.hasSecret ? 'Dejá vacío para no cambiarlo' : 'Pegá o generá un secreto';
+    const scope = d ? (d.scope || 'all') : 'all';
+    const rb = document.querySelector('input[name="whScope"][value="' + scope + '"]'); if (rb) rb.checked = true;
+    _whRenderPublishers(d ? d.publishers : []);
+    webhookScopeChanged();
+    document.getElementById('whEvCarga').checked = !!(d && d.events && d.events.carga);
+    document.getElementById('whEvRetiro').checked = !!(d && d.events && d.events.retiro);
+    document.getElementById('whFAtrib').checked = !!(d && d.fields && d.fields.atribucion);
+    document.getElementById('whFContacto').checked = !!(d && d.fields && d.fields.contacto);
+    document.getElementById('whEnabled').checked = d ? d.enabled !== false : true;
+    const m = document.getElementById('whMsg'); if (m) m.textContent = '';
+    ed.style.display = '';
+    ed.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function webhookCancel() { const ed = document.getElementById('webhookEditor'); if (ed) ed.style.display = 'none'; }
+function webhookGenSecret() {
+    const a = new Uint8Array(24); (window.crypto || window.msCrypto).getRandomValues(a);
+    const hex = Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    const el = document.getElementById('whSecret'); el.type = 'text'; el.value = 'whsec_' + hex;
+    showToast('Secreto generado: copialo AHORA y pasáselo a quien recibe (no se vuelve a mostrar)', 'success');
+}
+async function webhookSave() {
+    const m = document.getElementById('whMsg');
+    const scope = (document.querySelector('input[name="whScope"]:checked') || {}).value || 'all';
+    const publishers = Array.prototype.map.call(document.querySelectorAll('.whPub:checked'), function (c) { return c.value; });
+    const body = {
+        id: document.getElementById('whId').value || undefined,
+        name: document.getElementById('whName').value, url: document.getElementById('whUrl').value.trim(),
+        secret: document.getElementById('whSecret').value, scope, publishers,
+        events: { registro: true, primera_carga: true, carga: document.getElementById('whEvCarga').checked, retiro: document.getElementById('whEvRetiro').checked },
+        fields: { atribucion: document.getElementById('whFAtrib').checked, contacto: document.getElementById('whFContacto').checked },
+        enabled: document.getElementById('whEnabled').checked
+    };
+    if (body.fields.contacto && !confirm('Vas a mandar el MAIL y el TELÉFONO de los usuarios a ' + (body.name || body.url) + '. ¿Confirmás?')) return;
+    try {
+        const r = await authFetch('/api/admin/webhooks', { method: 'POST', body: JSON.stringify(body) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } return; }
+        showToast('Destino guardado', 'success');
+        webhookCancel(); loadWebhooksCard();
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+async function webhookDelete(id) {
+    const d = _whDests.find(function (x) { return x.id === id; });
+    if (!confirm('¿Borrar el destino "' + (d ? d.name : id) + '"? Deja de recibir avisos y se descarta lo que tenga en cola.')) return;
+    try {
+        const r = await authFetch('/api/admin/webhooks/' + encodeURIComponent(id), { method: 'DELETE' });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { showToast(j.error || 'No se pudo borrar', 'error'); return; }
+        showToast('Destino borrado', 'success'); loadWebhooksCard();
+    } catch (_) { showToast('Error de conexión', 'error'); }
+}
+async function webhookTest(id) {
+    showToast('Enviando aviso de prueba…', 'info');
+    try {
+        const r = await authFetch('/api/admin/webhooks/' + encodeURIComponent(id) + '/test', { method: 'POST' });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { showToast(j.error || 'No se pudo probar', 'error'); return; }
+        if (j.ok) showToast('✅ El receptor respondió ' + j.status, 'success');
+        else showToast('❌ No llegó: ' + (j.error || 'sin respuesta'), 'error');
+        loadWebhooksCard();
+    } catch (_) { showToast('Error de conexión', 'error'); }
+}
+window.loadWebhooksCard = loadWebhooksCard; window.webhookEdit = webhookEdit; window.webhookCancel = webhookCancel; window.webhookGenSecret = webhookGenSecret;
+window.webhookScopeChanged = webhookScopeChanged; window.webhookSave = webhookSave; window.webhookDelete = webhookDelete; window.webhookTest = webhookTest;
+
 async function checkAdminSession() {
     try {
         const response = await fetch(`${API_URL}/api/admin/me`, {
@@ -5950,6 +6077,7 @@ async function loadCBUConfig() {
     loadBonusRolloverCfg(); // #278
     loadAccessSwitches(); // #322
     loadUsernamePrefixCard(); // #328
+    loadWebhooksCard(); // #334
     // Cargar la config del bono de primera carga (solo admin general)
     loadFirstChargeBonus();
     // Cargar la config del banco automático (hgcash)

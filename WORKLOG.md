@@ -4,7 +4,46 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-07**
+> **Última actualización: 2026-10-08**
+
+## Sesión 2026-10-08
+
+### 334. Webhooks SALIENTES a publicistas (registro / primera carga / carga / retiro), en paralelo al pixel
+- Owner: "quiero enviar webhook de venta y de registro; ya lo tengo por pixel, quiero que vaya
+  por webhook EN PARALELO. Recibe un publicista, varios, o TODOS. Que envíe registro, primera
+  carga, carga OPCIONAL, retiros OPCIONAL, atribución OPCIONAL, mail y teléfono OPCIONAL —
+  marcables por destino".
+- **Nuevo `src/services/outboundWebhookService.js`** + modelo `OutboundWebhookQueue` (cola de
+  reintentos). Destinos en `Config['outboundWebhooks'].destinations[]`: `{id, name, url,
+  secretEnc (AES con la clave de #320), enabled, scope:'all'|'publishers', publishers[],
+  events:{registro, primera_carga, carga, retiro}, fields:{atribucion, contacto}}`. Registro y
+  primera carga van siempre; cargas, retiros, atribución y contacto son opcionales por destino.
+- **Alcance por publicista:** `metaCapi.resolveEventScope(user)` (misma regla que los pixels
+  de partner: campaña de adquisición / last-touch → `Campaign.publisher`); la lista acepta
+  nombre de publicista o código de campaña. Scope `all` incluye orgánicos.
+- **Aviso:** POST JSON con `X-Webhook-Event`, `X-Webhook-Id` (= `event_id`, estable por
+  evento: `<evento>_<userId>_<txId|payoutId|reg>`), `X-Webhook-Timestamp` y
+  `X-Webhook-Signature` = HMAC-SHA256 hex de `"{ts}.{body}"` con el secreto del destino.
+  Body: `event, event_id, sent_at, site, test, user{id, username, created_at, campaign,
+  publisher, influencer, source}, amount, currency, first_deposit, transaction_id,
+  occurred_at, attribution?{fbclid, fbc, fbp, utm_*, landing_url, registration_ip},
+  contact?{email, phone, phone_verified}`.
+- **Entrega:** fire-and-forget; 3 reintentos inmediatos (1 s / 4 s / 16 s), después cola en
+  Mongo cada 5 min hasta 10 intentos (worker `outboundWebhook.startWorker`, arranca con el de
+  fb-ads). 4xx (salvo 408/429) no se reintenta. Items de destinos borrados/apagados se descartan.
+- **Enganches en server.js** al lado de cada `fbAdsWebhook.notify` (que sigue igual): los 3
+  registros (`registro`), las 3 cargas acreditadas — auto-carga hgcash/GH, carga por admin,
+  `/api/movements/deposit` — (`carga` con `firstDeposit` → el destino lo recibe como
+  `primera_carga`), y `notifyPayoutPaid` (`retiro`).
+- **Panel → Configuración → card "🔗 Webhooks salientes"** (solo admin general): lista de
+  destinos con último resultado / en cola, editor (nombre, URL https, secreto con "generar al
+  azar", TODOS o tildar publicistas — salen de `Campaign.distinct('publisher')` —, opcionales,
+  activo), "Enviar prueba" (evento `prueba` con datos ficticios y `test:true`) y el formato
+  del aviso desplegable para pasarle al receptor. Endpoints `GET/POST /api/admin/webhooks`,
+  `DELETE /api/admin/webhooks/:id`, `POST /api/admin/webhooks/:id/test`.
+- `fbAdsWebhookService` (destino único por SSM) queda como estaba; no se tocó.
+- Probado en aislado con axios/mongoose stub: alcance, FTD→primera_carga, firma, opcionales,
+  cola tras 3 intentos. admin-sw v79. **Back necesita deploy.**
 
 ## Sesión 2026-10-07
 
