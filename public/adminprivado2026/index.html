@@ -1155,7 +1155,9 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                                 </select>
                             </div>
                             <button type="button" class="btn-primary" onclick="saveGhwalletConfig()">💾 Guardar GH Wallet</button>
+                            <button type="button" class="btn-secondary" onclick="ghwalletDiag()">🔎 ¿Llegan los avisos?</button>
                             <span id="ghwalletCfgMsg" style="font-size:12px;color:#aaa;margin-left:8px;"></span>
+                            <div id="ghwalletDiagBox" style="display:none;margin-top:10px;padding:10px;border-radius:8px;background:rgba(0,0,0,0.35);font-size:12px;line-height:1.6;"></div>
 
                             <div id="ghwalletCredBox" style="margin-top:18px;padding:14px;border:1px solid rgba(100,181,246,0.45);border-radius:10px;background:rgba(100,181,246,0.05);">
                                 <h4 style="margin:0 0 6px;color:#64b5f6;font-size:14px;">🔐 Cuenta GH Wallet conectada (token y secreto)</h4>

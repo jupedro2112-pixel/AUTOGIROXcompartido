@@ -3627,13 +3627,23 @@ function _ghwalletMovementDoc(event, d) {
 //   payment.reversed  → 'reversed'; si ya se había cargado → ALERTA (descontar a mano)
 //   payment.expired   → ignorado (es de cobros creados por API; no creamos cobros)
 //   payout.completed / payout.failed → estado del retiro (handlePayoutStatusWebhook)
+// Contadores en memoria (por instancia) para el diagnóstico del panel: "¿llegó algo?".
+const _ghwalletWebhookStats = { received: 0, accepted: 0, rejected: 0, lastAt: null, lastEvent: null, lastResult: null, lastIp: null };
+function _ghwStat(result, event, req) {
+  _ghwalletWebhookStats.received++;
+  if (/^ok/.test(result)) _ghwalletWebhookStats.accepted++; else _ghwalletWebhookStats.rejected++;
+  _ghwalletWebhookStats.lastAt = new Date(); _ghwalletWebhookStats.lastEvent = event || null;
+  _ghwalletWebhookStats.lastResult = result; _ghwalletWebhookStats.lastIp = req ? req.ip : null;
+}
 app.post('/api/ghwallet/webhook', async (req, res) => {
   try {
     const secrets = _ghwalletWebhookSecrets();
+    const _evName = String((req.body && req.body.event) || '').toLowerCase() || null;
     const rawBody = req.rawBody ? req.rawBody : Buffer.from(JSON.stringify(req.body || {}), 'utf8');
     if (!secrets.length) {
       if (process.env.NODE_ENV === 'production') {
         logger.error('[ghwallet] webhook RECHAZADO en producción: falta el secreto (panel → GH Wallet, o GHWALLET_WEBHOOK_SECRET en SSM)');
+        _ghwStat('rechazado: sin secreto configurado', _evName, req);
         return res.status(503).json({ error: 'webhook no configurado' });
       }
       logger.warn('[ghwallet] webhook recibido SIN secreto — no se valida firma (solo dev)');
@@ -3646,6 +3656,7 @@ app.post('/api/ghwallet/webhook', async (req, res) => {
       });
       if (!v.ok) {
         logger.warn(`[ghwallet] webhook con firma inválida (${v.reason}) — rechazado (ip=${req.ip} fwdBy=${req.get('X-Forwarded-By') || '-'})`);
+        _ghwStat('rechazado: ' + v.reason + (v.reason === 'firma_invalida' ? ' (el secreto del panel no coincide con el de GH Wallet)' : ''), _evName, req);
         return res.status(v.reason === 'timestamp_viejo' || v.reason === 'sin_timestamp' ? 400 : 401).json({ error: 'firma inválida' });
       }
     }
@@ -3656,7 +3667,8 @@ app.post('/api/ghwallet/webhook', async (req, res) => {
     const p = req.body || {};
     const event = String(p.event || '').toLowerCase();
     const d = p.data || {};
-    if (!event || !d.id) return res.status(400).json({ error: 'payload sin event/data.id' });
+    if (!event || !d.id) { _ghwStat('rechazado: payload sin event/data.id', _evName, req); return res.status(400).json({ error: 'payload sin event/data.id' }); }
+    _ghwStat('ok', event, req);
 
     // Retiros: mapear al handler de hgcash (DONE / ERROR) buscando por client_ref (= payout.id).
     if (event === 'payout.completed' || event === 'payout.failed') {
@@ -18956,6 +18968,18 @@ app.delete('/api/admin/ghwallet/credentials', authMiddleware, adminMiddleware, a
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
 // Cuenta de depósito (titular / CVU / alias / cuit) + saldo de GH Wallet.
+// Diagnóstico: qué avisos intentó mandar GH Wallet (su API) + qué recibimos nosotros.
+app.get('/api/admin/ghwallet/webhooks', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const out = { local: Object.assign({}, _ghwalletWebhookStats), secretConfigured: _ghwalletWebhookSecrets().length > 0, webhookFullUrl: getPublicBaseUrl() + '/api/ghwallet/webhook', remote: null, remoteError: null };
+    if (ghwallet.isEnabled()) {
+      const r = await ghwallet.listWebhooks({ limit: 20 });
+      if (r.ok) out.remote = r.data; else out.remoteError = r.error || ('HTTP ' + r.httpStatus);
+    } else out.remoteError = 'sin token';
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
 app.get('/api/admin/ghwallet/account', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });

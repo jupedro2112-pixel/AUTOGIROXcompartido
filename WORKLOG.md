@@ -8,6 +8,18 @@
 
 ## Sesión 2026-10-08
 
+### 335. GH Wallet: diagnóstico "¿Llegan los avisos?" (primera carga real no apareció)
+- Owner transfirió $5.000 reales a la cuenta de GH Wallet (figura en GH como Cobro 18:40) y
+  en el panel "Movimientos del banco → GH Wallet" quedó vacío: el webhook NO llegó al server
+  (o se rechazó antes de persistir). Sin logs a mano no se podía saber cuál.
+- Botón **"🔎 ¿Llegan los avisos?"** en el bloque GH Wallet → `GET /api/admin/ghwallet/webhooks`:
+  (a) contadores en memoria del handler (`_ghwalletWebhookStats`: recibidos / aceptados /
+  rechazados, último evento y motivo del rechazo — p. ej. `firma_invalida`), y (b) lo que GH
+  Wallet dice que mandó (`ghwallet.listWebhooks`, su `GET /webhooks`): fecha, evento, URL
+  destino y código de respuesta. Lectura: lista vacía en GH = la dirección de avisos no está
+  cargada en esa clave o los eventos no están activados; URL distinta = le avisa a otro
+  server; 401 = el secreto no coincide. admin-sw v80. **Back necesita deploy.**
+
 ### 334. Webhooks SALIENTES a publicistas (registro / primera carga / carga / retiro), en paralelo al pixel
 - Owner: "quiero enviar webhook de venta y de registro; ya lo tengo por pixel, quiero que vaya
   por webhook EN PARALELO. Recibe un publicista, varios, o TODOS. Que envíe registro, primera

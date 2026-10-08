@@ -6640,6 +6640,43 @@ async function saveGhwalletConfig() {
         loadBanks();
     } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
 }
+// Diagnóstico de avisos: lo que GH Wallet dice que mandó (su API) vs. lo que recibió este server.
+function _diagVal(v) { if (v === null || v === undefined) return '—'; if (typeof v === 'object') return escapeHtml(JSON.stringify(v)); return escapeHtml(String(v)); }
+async function ghwalletDiag() {
+    const box = document.getElementById('ghwalletDiagBox'); if (!box) return;
+    box.style.display = ''; box.innerHTML = '⏳ Consultando…';
+    try {
+        const r = await authFetch('/api/admin/ghwallet/webhooks');
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { box.innerHTML = '<span style="color:#ff8080;">' + escapeHtml(j.error || 'No se pudo consultar') + '</span>'; return; }
+        const L = j.local || {};
+        let h = '<b>📥 Este server</b> (desde el último arranque de esta instancia): recibió <b>' + (L.received || 0) + '</b> avisos · aceptó ' + (L.accepted || 0) + ' · rechazó ' + (L.rejected || 0) + '.';
+        if (L.lastAt) h += '<br>Último: ' + fmtFechaHoraAR(L.lastAt) + ' · evento <code>' + escapeHtml(L.lastEvent || '?') + '</code> · resultado: ' + (L.lastResult === 'ok' ? '<span style="color:#66ff99;">aceptado</span>' : '<span style="color:#ff8080;">' + escapeHtml(L.lastResult || '') + '</span>');
+        else h += '<br><span style="color:#ffb74d;">⚠️ A esta instancia NO le llegó ningún aviso todavía.</span>';
+        h += '<br>Dirección que tiene que estar cargada en GH Wallet → API → "dirección de avisos": <code>' + escapeHtml(j.webhookFullUrl || '') + '</code>' + (j.secretConfigured ? '' : ' · <span style="color:#ff8080;">sin secreto</span>');
+        h += '<br><br><b>📤 Lo que GH Wallet dice que mandó</b> (su API, últimos 20):';
+        if (j.remoteError) h += '<br><span style="color:#ff8080;">No se pudo leer: ' + escapeHtml(String(j.remoteError)) + '</span>';
+        else {
+            const rem = j.remote || {};
+            const list = Array.isArray(rem) ? rem : (rem.webhooks || rem.data || rem.items || rem.deliveries || []);
+            if (!list.length) h += '<br><span style="color:#ffb74d;">GH Wallet no registra NINGÚN aviso enviado: la dirección de avisos no está cargada en esa clave de API, o los eventos no están activados (pedile a Enzo que active payment.paid / payment.verified / payout.* para esta clave).</span>' + (Object.keys(rem).length && !Array.isArray(rem) ? '<br><small>Respuesta: ' + _diagVal(rem).slice(0, 400) + '</small>' : '');
+            else {
+                h += '<table style="width:100%;font-size:11px;margin-top:6px;border-collapse:collapse;">';
+                list.slice(0, 20).forEach(function (w) {
+                    const ev = w.event || w.type || w.evento || '?';
+                    const url = w.url || w.target_url || w.destino || '';
+                    const code = w.response_status != null ? w.response_status : (w.status_code != null ? w.status_code : (w.http_status != null ? w.http_status : (w.status || w.estado || '')));
+                    const when = w.created_at || w.sent_at || w.fecha || w.delivered_at || '';
+                    const ok = w.success === true || w.delivered === true || (Number(code) >= 200 && Number(code) < 300);
+                    h += '<tr style="border-top:1px solid rgba(255,255,255,0.08);"><td style="padding:3px 4px;">' + (when ? fmtFechaHoraAR(when) : '—') + '</td><td style="padding:3px 4px;"><code>' + _diagVal(ev) + '</code></td><td style="padding:3px 4px;word-break:break-all;">' + _diagVal(url) + '</td><td style="padding:3px 4px;color:' + (ok ? '#66ff99' : '#ff8080') + ';">' + _diagVal(code) + (w.error ? ' ' + _diagVal(w.error) : '') + '</td></tr>';
+                });
+                h += '</table><small style="color:#aaa;">Si la URL que figura acá no es la de arriba, GH Wallet le está avisando a otro server. Si figura 401, el secreto del panel no es el de esa clave.</small>';
+            }
+        }
+        box.innerHTML = h;
+    } catch (_) { box.innerHTML = '<span style="color:#ff8080;">Error de conexión</span>'; }
+}
+window.ghwalletDiag = ghwalletDiag;
 async function loadGhwalletCredentials() {
     const st = document.getElementById('ghwalletCredStatus');
     const box = document.getElementById('ghwalletAccountBox');
