@@ -8,6 +8,24 @@
 
 ## Sesión 2026-10-08
 
+### 338. GH Wallet: opción "cargar AL INSTANTE con payment.paid" + descuento automático si GH revierte
+- Owner: "esos que quedan pendientes 5 minutos, el cliente no va a parar de quejarse. Cargar
+  sin esperar la verificación y, si después falla, sacarle el saldo".
+- `Config['ghwallet'].chargeOn`: `'verified'` (default: como hasta ahora, carga con
+  `payment.verified`) o `'paid'` (carga apenas entra el `payment.paid`/held). Se elige en el
+  bloque GH Wallet → "Cuándo cargar" (con confirm). `getGhwalletConfig()` deriva
+  `acceptStatuses` (`['done']` o `['held','done']`) y lo usan `_bankCfgForMovement` /
+  `_cfgOf`; el webhook también matchea en `held` cuando chargeOn='paid'.
+- **Reversión con fichas ya dadas** (`payment.reversed` sobre `auto_charged`): antes solo
+  alertaba "descontar a mano". Ahora `_autoDebitReversedGhwallet`: lee `available` fresco,
+  debita `min(available, monto)` vía `girox.withdrawFromUser` con reference estable
+  `vip-gwrev-<movementId>` (idempotente; además chequea una Transaction previa con
+  `metadata.ghwalletReversedOf`), crea Transaction `withdrawal` (`adminUsername
+  'auto-ghwallet'`), mensaje al cliente (`/sys_gw_reversed`, editable) y nota interna. Si
+  no alcanzó o falló → alerta `security_alert` + nota "terminá a mano" con lo que falta.
+- Estado del banco en "Bancos automáticos" muestra "carga al instante / con verificación".
+  admin-sw v82. **Back necesita deploy.** Reference nueva: `vip-gwrev-*`.
+
 ### 337. GH Wallet: cobros que quedaban "en verificación" para siempre (avisos desordenados) + poll de respaldo
 - Owner: la mayoría de los cobros entran como verificados, pero algunos quedan con ⏳ "en
   verificación" aunque en GH ya están firmes.

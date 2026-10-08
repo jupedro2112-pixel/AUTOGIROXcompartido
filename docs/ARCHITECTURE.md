@@ -448,6 +448,7 @@ Prefijos en uso hoy:
 | `vip-fire-<userId>-d<día>-<fecha>` | Premio de fueguito | userId + hito + día ART |
 | `vip-install-<userId>` | Bono instalación $5.000 | userId (una sola vez en la vida) |
 | `vip-payout-<payoutId>` | Débito al confirmar un retiro | PendingPayout.id |
+| `vip-gwrev-<movementId>` | Débito automático cuando GH Wallet revierte un cobro ya cargado (#338) | BankMovement.movementId (`gw:<id>`) |
 | `vip-payoutref-<payoutId>` (+ `-chips-` / `-bonus-`) | Devolución de retiro rechazado | PendingPayout.id |
 | `vip-refcom-<payoutId>` | Comisión de referidos | ReferralPayout.id (uuid persistido en Mongo ANTES de llamar; si un intento anterior quedó pending/failed se REUSA el documento ⇒ misma reference) |
 | `vip-lvl-<userId>-<idx>` | Bono por alcanzar un nivel VIP | userId + índice del nivel (cada nivel se paga UNA vez en la vida; por eso NO se pueden reordenar los idx de vipLevels.js) |
@@ -1055,7 +1056,10 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   (registro y primera_carga siempre; carga y retiro opcionales) y datos opcionales
   (atribución, mail/teléfono). `GET/POST /api/admin/webhooks`, `DELETE /:id`, `POST /:id/test`.
   (Diagnóstico de los avisos ENTRANTES de GH Wallet: `GET /api/admin/ghwallet/webhooks`,
-  #335. Matcheo: un movimiento con `date` fuera de la ventana no es candidato aunque haya
+  #335. `Config['ghwallet'].chargeOn` = 'verified' | 'paid' (#338): con 'paid' se carga
+  en `held` y una reversión posterior descuenta sola (`_autoDebitReversedGhwallet`,
+  reference `vip-gwrev-<movementId>`, Transaction withdrawal, `/sys_gw_reversed`).
+  Matcheo: un movimiento con `date` fuera de la ventana no es candidato aunque haya
   llegado recién — GH reenvía el histórico al cargar la URL —, y la ventana corta del lado
   movimiento se mide desde su primer aviso `held`, #336.)
   botón "¿Llegan los avisos?" en el bloque GH Wallet, #335.)

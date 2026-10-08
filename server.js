@@ -2437,12 +2437,18 @@ async function getHgcashConfig() {
 //   matcheo por coelsa/nombre, mismos candados (HgcashCharge por coelsa, guard de
 //   duplicados, multicuenta bancaria) y misma reference `vip-hg-<coelsa>`.
 // ============================================================
-const GHWALLET_DEFAULTS = { enabled: false, mode: 'shadow' };
+// #338 chargeOn: 'verified' = cargar recién con payment.verified (plata firme, 1-5 min);
+// 'paid' = cargar al instante con payment.paid (retenido) y, si GH lo revierte después,
+// descontar las fichas solas (`_autoDebitReversedGhwallet`). Owner 2026-10-08: "el
+// cliente no va a parar de quejarse 5 minutos".
+const GHWALLET_DEFAULTS = { enabled: false, mode: 'shadow', chargeOn: 'verified' };
 async function getGhwalletConfig() {
   const cfg = await getConfig('ghwallet', null);
   const merged = Object.assign({}, GHWALLET_DEFAULTS, cfg || {});
   merged.enabled = merged.enabled === true;
   merged.mode = merged.mode === 'auto' ? 'auto' : 'shadow';
+  merged.chargeOn = merged.chargeOn === 'paid' ? 'paid' : 'verified';
+  merged.acceptStatuses = merged.chargeOn === 'paid' ? ['held', 'done'] : ['done'];
   return merged;
 }
 const BANK_PROVIDERS = ['hgcash', 'ghwallet'];
@@ -2457,7 +2463,7 @@ async function _bankCfgForMovement(movement) {
   const base = await getHgcashConfig();
   if (movement && movement.provider === 'ghwallet') {
     const gw = await getGhwalletConfig();
-    return Object.assign({}, base, { enabled: gw.enabled, mode: gw.mode, acceptStatuses: ['done'] });
+    return Object.assign({}, base, { enabled: gw.enabled, mode: gw.mode, acceptStatuses: gw.acceptStatuses });
   }
   return base;
 }
@@ -3293,7 +3299,7 @@ async function hgcashMatchFromComprobante(comprobante) {
 
     // #332: cada movimiento se evalúa con la config de SU banco (un banco apagado
     // no aporta candidatos; GH Wallet solo cuenta con status 'done' = verificado).
-    const _cfgOf = (m) => (m.provider === 'ghwallet' ? Object.assign({}, cfg, { enabled: gwCfg.enabled, mode: gwCfg.mode, acceptStatuses: ['done'] }) : cfg);
+    const _cfgOf = (m) => (m.provider === 'ghwallet' ? Object.assign({}, cfg, { enabled: gwCfg.enabled, mode: gwCfg.mode, acceptStatuses: gwCfg.acceptStatuses }) : cfg);
     const matches = candidates.filter(m => {
       const c = _cfgOf(m);
       return c.enabled && _statusAccredited(m.status, c) && _comprobanteMatchesMovement(comprobante, m, c);
@@ -3635,6 +3641,54 @@ function _ghwalletMovementDoc(event, d) {
 //   payment.reversed  → 'reversed'; si ya se había cargado → ALERTA (descontar a mano)
 //   payment.expired   → ignorado (es de cobros creados por API; no creamos cobros)
 //   payout.completed / payout.failed → estado del retiro (handlePayoutStatusWebhook)
+// #338: descuento automático cuando GH Wallet revierte un cobro que ya se cargó
+// (chargeOn='paid'). Reference estable `vip-gwrev-<movementId>`: reintentar no debita dos veces.
+async function _autoDebitReversedGhwallet(m, doc) {
+  const amt = Number(doc.amount) || Number(m.amount) || 0;
+  const userId = m.matchedUserId, username = m.matchedUsername;
+  if (!userId || !username || !(amt > 0)) return { ok: false, error: 'sin usuario/monto' };
+  try {
+    const already = await Transaction.findOne({ userId, type: 'withdrawal', 'metadata.ghwalletReversedOf': m.movementId }).lean();
+    if (already) return { ok: true, debited: Number(already.amount) || 0, partial: (Number(already.amount) || 0) < amt, repeated: true };
+    const balRes = await girox.getUserBalance(username, { fresh: true });
+    const avail = (balRes && balRes.success) ? (Number(balRes.available != null ? balRes.available : balRes.balance) || 0) : null;
+    if (avail === null) return { ok: false, error: 'no se pudo leer el saldo' };
+    const toDebit = Math.min(avail, amt);
+    if (toDebit <= 0) {
+      await BankMovement.updateOne({ movementId: m.movementId }, { $set: { chargeError: `reversed por GH Wallet: sin saldo para descontar (disponible $${avail})` } });
+      return { ok: true, debited: 0, partial: true };
+    }
+    const w = await girox.withdrawFromUser(username, toDebit, `Reversión GH Wallet - ${username}`, `vip-gwrev-${m.movementId}`);
+    if (!w || !w.success) return { ok: false, error: (w && w.error) || 'la plataforma rechazó el descuento' };
+    await Transaction.create({
+      id: uuidv4(), type: 'withdrawal', amount: toDebit, username, userId, status: 'completed',
+      description: `Descuento automático: GH Wallet revirtió la transferencia de $${amt.toLocaleString('es-AR')} (coelsa ${doc.coelsaCode || '-'})`,
+      adminId: 'system', adminUsername: 'auto-ghwallet', adminRole: 'system',
+      transactionId: w.data && (w.data.transfer_id || w.data.transferId) || null,
+      metadata: { ghwalletReversedOf: m.movementId, reversedAmount: amt, availableBefore: avail }
+    });
+    const partial = toDebit < amt;
+    await BankMovement.updateOne({ movementId: m.movementId }, { $set: { chargeError: `reversed por GH Wallet: descontados $${toDebit.toLocaleString('es-AR')}${partial ? ` de $${amt.toLocaleString('es-AR')} (saldo insuficiente)` : ''}` } });
+    try {
+      const content = await renderSystemCommand('/sys_gw_reversed',
+        '⚠️ Tu banco REVIRTIÓ la transferencia de ${amount} que ya te habíamos cargado (la plata no llegó a nuestra cuenta). Por eso descontamos ${debited} de tu saldo. Si creés que es un error, mandanos el comprobante de tu banco y lo revisamos.',
+        { amount: amt.toLocaleString('es-AR'), debited: toDebit.toLocaleString('es-AR') });
+      if (content) {
+        const msg = await Message.create({ id: uuidv4(), senderId: 'admin', senderUsername: 'Sistema', senderRole: 'admin', receiverId: userId, receiverRole: 'user', content, type: 'system', timestamp: new Date(), read: false });
+        const data = { id: msg.id, senderId: 'admin', senderUsername: 'Sistema', senderRole: 'admin', receiverId: userId, receiverRole: 'user', content, type: 'system', timestamp: msg.timestamp, read: false };
+        io.to(`user_${userId}`).emit('new_message', data);
+        io.to(`chat_${userId}`).emit('new_message', data);
+        notifyAdmins('new_message', { message: data, userId, username });
+      }
+    } catch (_) {}
+    await _emitAdminOnlyChatNote(userId, username, `↩️ GH Wallet revirtió la transferencia de $${amt.toLocaleString('es-AR')} (coelsa ${doc.coelsaCode || '-'}) que se había cargado sola. Se descontaron $${toDebit.toLocaleString('es-AR')} automáticamente${partial ? ' (NO alcanzó: terminá a mano)' : ''}.`).catch(() => {});
+    logger.warn(`[ghwallet] reversión ${m.movementId}: descontados $${toDebit} de $${amt} a ${username}${partial ? ' (PARCIAL)' : ''}`);
+    return { ok: true, debited: toDebit, partial };
+  } catch (e) {
+    logger.error(`[ghwallet] descuento por reversión falló (${m.movementId}): ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+}
 // Contadores en memoria (por instancia) para el diagnóstico del panel: "¿llegó algo?".
 const _ghwalletWebhookStats = { received: 0, accepted: 0, rejected: 0, lastAt: null, lastEvent: null, lastResult: null, lastIp: null };
 function _ghwStat(result, event, req) {
@@ -3727,18 +3781,24 @@ app.post('/api/ghwallet/webhook', async (req, res) => {
     if (event === 'payment.reversed') {
       const m = fresh || await BankMovement.findOne({ movementId: doc.movementId }).lean();
       if (m && m.matchStatus === 'auto_charged') {
-        // La plata NO quedó y las fichas YA se dieron → alerta fuerte; no se debita solo.
-        logger.error(`[ghwallet] REVERSIÓN de un cobro YA CARGADO: ${d.id} $${doc.amount} user=${m.matchedUsername || '?'} — descontar a mano`);
+        // #338: la plata NO quedó y las fichas YA se dieron → se descuentan SOLAS (lo que
+        // haya disponible) y se avisa; si no alcanzó, alerta para terminar a mano.
+        logger.error(`[ghwallet] REVERSIÓN de un cobro YA CARGADO: ${d.id} $${doc.amount} user=${m.matchedUsername || '?'} — descontando`);
+        const rev = await _autoDebitReversedGhwallet(m, doc);
+        if (rev.ok && !rev.partial) return;
         await _emitAdminOnlyChatNote(m.matchedUserId, m.matchedUsername,
-          `🚨 GH WALLET REVIRTIÓ una transferencia que YA se había cargado: $${Number(doc.amount).toLocaleString('es-AR')} (coelsa ${doc.coelsaCode || '-'}). La plata NO quedó en la cuenta. Hay que DESCONTAR las fichas a mano y revisar al cliente.`).catch(() => {});
+          `🚨 GH WALLET REVIRTIÓ una transferencia YA cargada: $${Number(doc.amount).toLocaleString('es-AR')} (coelsa ${doc.coelsaCode || '-'}). ${rev.ok ? `Se descontaron $${Number(rev.debited).toLocaleString('es-AR')} (todo lo que tenía); FALTAN $${Number(doc.amount - rev.debited).toLocaleString('es-AR')}.` : `NO se pudo descontar (${rev.error || 'error'}).`} Terminá a mano y revisá al cliente.`).catch(() => {});
         try { notifyAdmins('security_alert', { kind: 'ghwallet_reversed', username: m.matchedUsername, amount: doc.amount, movementId: doc.movementId }); } catch (_) {}
-      } else if (m && ['pending', 'no_match', 'shadow_matched', 'needs_review'].includes(m.matchStatus)) {
+        return;
+      }
+      if (m && ['pending', 'no_match', 'shadow_matched', 'needs_review'].includes(m.matchStatus)) {
         await BankMovement.updateOne({ movementId: doc.movementId }, { $set: { matchStatus: 'ignored', chargeError: 'reversed por GH Wallet' } });
       }
       return;
     }
-    if (doc.status === 'done') {
-      // Verificado → matchear contra comprobantes (misma lógica que hgcash).
+    const gwCfgNow = await getGhwalletConfig();
+    if (doc.status === 'done' || (doc.status === 'held' && gwCfgNow.chargeOn === 'paid')) {
+      // Verificado (o retenido con chargeOn='paid', #338) → matchear contra comprobantes.
       const m = await BankMovement.findOne({ movementId: doc.movementId }).lean();
       if (m) hgcashMatchFromMovement(m).catch(() => {});
     } else {
@@ -18805,7 +18865,7 @@ async function _banksPayload() {
   return {
     incoming, payouts: provider,
     hgcash: { enabled: hg.enabled, mode: hg.mode, token: hgcashPay.getTokenSource(), secret: _hgcashWebhookSecrets().length > 0, accountName: hg.accountName || '', cbu: hg.cbu || '' },
-    ghwallet: { enabled: gw.enabled, mode: gw.mode, token: ghwallet.getTokenSource(), secret: _ghwalletWebhookSecrets().length > 0, test: ghwallet.isTestToken() }
+    ghwallet: { enabled: gw.enabled, mode: gw.mode, chargeOn: gw.chargeOn, token: ghwallet.getTokenSource(), secret: _ghwalletWebhookSecrets().length > 0, test: ghwallet.isTestToken() }
   };
 }
 // #334 Webhooks salientes — CRUD desde el panel (solo admin general).
@@ -18920,7 +18980,8 @@ app.post('/api/admin/ghwallet/config', authMiddleware, adminMiddleware, async (r
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
     const b = req.body || {};
     const cur = await getGhwalletConfig();
-    const next = { enabled: typeof b.enabled === 'boolean' ? b.enabled : cur.enabled, mode: b.mode === 'auto' ? 'auto' : (b.mode === 'shadow' ? 'shadow' : cur.mode) };
+    const next = { enabled: typeof b.enabled === 'boolean' ? b.enabled : cur.enabled, mode: b.mode === 'auto' ? 'auto' : (b.mode === 'shadow' ? 'shadow' : cur.mode),
+      chargeOn: b.chargeOn === 'paid' ? 'paid' : (b.chargeOn === 'verified' ? 'verified' : cur.chargeOn) };
     if (next.enabled && !ghwallet.isEnabled()) return res.status(400).json({ error: 'Cargá primero el token de GH Wallet (abajo, "Probar y guardar").' });
     await Config.set('ghwallet', next, req.user.username);
     logger.info(`[ghwallet] config: ${req.user.username} → ${next.enabled ? 'ACTIVO' : 'apagado'} modo ${next.mode}`);

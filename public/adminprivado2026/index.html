@@ -1154,6 +1154,14 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                                     <option value="auto">Auto (carga sola con match exacto)</option>
                                 </select>
                             </div>
+                            <div class="form-group">
+                                <label>Cuándo cargar:</label>
+                                <select id="ghwalletChargeOn" style="width:100%;">
+                                    <option value="verified">Cuando GH Wallet la da por FIRME (payment.verified, 1-5 min; sin riesgo)</option>
+                                    <option value="paid">AL INSTANTE, apenas entra (payment.paid). Si GH la revierte después, se descuentan las fichas solas</option>
+                                </select>
+                                <small style="color:#aaa;font-size:11px;">Con "al instante" el cliente no espera. Si el banco revierte la plata, el sistema descuenta el saldo que tenga (y avisa si no alcanzó).</small>
+                            </div>
                             <button type="button" class="btn-primary" onclick="saveGhwalletConfig()">💾 Guardar GH Wallet</button>
                             <button type="button" class="btn-secondary" onclick="ghwalletDiag()">🔎 ¿Llegan los avisos?</button>
                             <span id="ghwalletCfgMsg" style="font-size:12px;color:#aaa;margin-left:8px;"></span>
