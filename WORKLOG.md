@@ -8,6 +8,16 @@
 
 ## Sesión 2026-10-08
 
+### 340. Comprobante reenviado por el mismo cliente → se reintenta el cruce con el ORIGINAL
+- Owner: "cuando no matchea y después manda de vuelta el mismo comprobante, no le carga
+  porque lo toma como duplicado, ¿está bien?". No: el reenvío sigue marcado como duplicado
+  (no es objetivo de carga), pero ahora, si es el MISMO cliente y el original no se cargó
+  (`autoCharged` false, `bankMatchStatus` none/pending), se vuelve a correr
+  `hgcashMatchFromComprobante` con el original (completado con los datos que la IA haya
+  leído mejor ahora: coelsa, nombres). Si la transferencia ya está → carga sola; si no, la
+  nota "SIN CARGA AUTOMÁTICA" + chat a Abiertos como siempre. Otro usuario con el mismo
+  comprobante → alerta de siempre, sin reintento. **Back necesita deploy.**
+
 ### 339. GH Wallet: el comprobante NO matcheaba (destino "GH Wallet" + coelsa vs ID de operación)
 - Caso real (owner, 19:30): movimiento GH $2.500 de "LOGISTICA ECKERDT FILMS S.A" (coelsa
   `7L8GYKNX…`) + comprobante del cliente 1 min después con el mismo nombre, destino

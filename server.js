@@ -2357,10 +2357,26 @@ async function analyzeComprobanteFromMessage({ userId, username, content, messag
       } catch (_) {}
       // Regla owner 2026-08-26: si el comprobante NO se carga solo, el cliente
       // queda colgado → el chat va a ABIERTOS para que un agente lo resuelva.
-      await _reopenChatForManualCharge(userId, username);
+      // #340: el MISMO cliente reenvía el comprobante porque la primera vez no se cargó
+      // (la transferencia todavía no había llegado, etc.). El reenvío no es objetivo de
+      // carga (sigue siendo duplicado), pero el ORIGINAL sí: se vuelve a intentar el cruce
+      // con el banco con el original (más los datos que la IA haya leído mejor ahora).
+      // Idempotente: hgcashAutoCarga chequea `autoCharged` y HgcashCharge.chargeKey.
+      let retried = false;
+      if (sameUser && !original.autoCharged && original.status !== 'duplicate' && ['none', 'pending', undefined, null].includes(original.bankMatchStatus)) {
+        retried = true;
+        hgcashMatchFromComprobante(Object.assign({}, original, {
+          coelsaCode: original.coelsaCode || base.coelsaCode || null,
+          operationNumber: original.operationNumber || base.operationNumber || null,
+          originHolder: original.originHolder || base.originHolder || null,
+          destHolder: original.destHolder || base.destHolder || null,
+          destCbu: original.destCbu || base.destCbu || null
+        })).catch(() => {});
+      }
+      if (!retried) await _reopenChatForManualCharge(userId, username);
       if (sameUser) {
         await _emitAdminOnlyChatNote(userId, username,
-          `🧾 Comprobante REPETIDO (${dataDesc}). El propio cliente ya lo había enviado antes. NO se cargó automático — revisá si ya está acreditado y respondele.`);
+          `🧾 Comprobante REPETIDO (${dataDesc}). El propio cliente ya lo había enviado antes.${retried ? ' Se volvió a intentar el cruce con el banco automático con el original: si ahora la transferencia está, se carga sola; si no, queda a mano' : ' NO se cargó automático — revisá si ya está acreditado y respondele'}.`);
       } else {
         await _emitAdminOnlyChatNote(userId, username,
           `🚨 COMPROBANTE YA UTILIZADO POR: @${original.username || original.userId}\n${dataDesc}\n⚠️ Ya lo había enviado otro usuario. NO cargar sin verificar.`);
