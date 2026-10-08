@@ -1054,6 +1054,8 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   URL https, alcance TODOS o lista de publicistas (`metaCapi.resolveEventScope`), eventos
   (registro y primera_carga siempre; carga y retiro opcionales) y datos opcionales
   (atribución, mail/teléfono). `GET/POST /api/admin/webhooks`, `DELETE /:id`, `POST /:id/test`.
+  (Diagnóstico de los avisos ENTRANTES de GH Wallet: `GET /api/admin/ghwallet/webhooks`,
+  botón "¿Llegan los avisos?" en el bloque GH Wallet, #335.)
   Servicio `src/services/outboundWebhookService.js` (firma HMAC-SHA256 de `"{ts}.{body}"`,
   headers `X-Webhook-*`, 3 reintentos + cola). Los enganches están junto a cada
   `fbAdsWebhook.notify` (registro ×3, carga acreditada ×3, `notifyPayoutPaid`). El pixel de Meta
