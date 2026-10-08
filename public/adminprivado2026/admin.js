@@ -6829,11 +6829,14 @@ async function loadHgcashMovements(page = 1) {
         }
         body.innerHTML = movs.map(m => {
             // #336: fecha de la transferencia según el banco; si llegó mucho después (reenvío), se aclara.
-            const fecha = (m.date || m.createdAt) ? fmtFechaHoraAR(m.date || m.createdAt) : '—';
-            const lateMin = m.date && m.createdAt ? Math.round((new Date(m.createdAt) - new Date(m.date)) / 60000) : 0;
+            // Solo GH Wallet trae `date` con zona horaria; el de hgcash viene corrido 3 h → se usa createdAt.
+            const isGw = m.provider === 'ghwallet';
+            const fecha = (isGw && m.date) ? fmtFechaHoraAR(m.date) : (m.createdAt ? fmtFechaHoraAR(m.createdAt) : '—');
+            const lateMin = isGw && m.date && m.createdAt ? Math.round((new Date(m.createdAt) - new Date(m.date)) / 60000) : 0;
             const fechaExtra = lateMin > 15 ? '<br><small style="color:#ffb74d;" title="El banco avisó ' + lateMin + ' min después de la transferencia">avisó +' + lateMin + ' min</small>' : '';
             const dir = (m.direction === 'Inbound' ? '⬇️ Entra' : (m.direction === 'Outbound' ? '⬆️ Sale' : '—')) +
-                (m.provider === 'ghwallet' ? ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(100,181,246,0.2);color:#64b5f6;font-weight:800;" title="GH Wallet">GH</span>' : '') +
+                (m.provider === 'ghwallet' ? ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(100,181,246,0.2);color:#64b5f6;font-weight:800;" title="GH Wallet">GH</span>'
+                    : ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(212,175,55,0.2);color:#d4af37;font-weight:800;" title="hgcash">HG</span>') +
                 (m.provider === 'ghwallet' && m.status === 'held' ? ' <span style="font-size:10px;color:#ffb74d;" title="GH Wallet todavía no la dio por firme (payment.verified)">⏳ en verificación</span>' : '') +
                 (m.provider === 'ghwallet' && m.status === 'reversed' ? ' <span style="font-size:10px;color:#ff8080;">↩️ REVERTIDA</span>' : '');
             const monto = m.amount != null ? '$' + Number(m.amount).toLocaleString('es-AR') : (m.amountRaw || '—');

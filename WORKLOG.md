@@ -8,6 +8,21 @@
 
 ## Sesión 2026-10-08
 
+### 341. Primera carga automática por GH Wallet ✅ + etiquetas de banco + "avisó +180 min" (hgcash)
+- Primera auto-carga real por GH: $2.100 de "GRYMA INVESTMENTS SA" → @gxmoisesprueba954,
+  acreditada al instante (chargeOn='paid') con match por coelsa.
+- **Etiqueta del banco:** las notas internas decían "CARGA AUTOMÁTICA hgcash" aunque entró por
+  GH. `hgcashAutoCarga`, `hgcashHandleChargeFailure`, el match en sombra y `opDesc` usan
+  `_bankLabel(movement.provider)`. En "Movimientos del banco" los de hgcash llevan badge
+  **HG** (dorado) como los GH llevan **GH** (celeste).
+- **"avisó +180 min" en TODOS los de hgcash:** el `date` de hgcash viene como hora local sin
+  zona (`new Date('2026-10-08 16:55')` → 3 h corrido); el de GH (`paid_at`) es ISO con zona.
+  ⚠️ El filtro anti-replay de #336 (`date >= since`) estaba EXCLUYENDO a todo hgcash del
+  cruce por comprobante (regresión de hoy, nunca llegó a producción con hgcash activo):
+  ahora aplica solo a `provider:'ghwallet'`. En la tabla, la fecha del banco (y el "avisó +N
+  min") se muestra solo para GH; hgcash sigue con la hora de llegada. admin-sw v83.
+  **Back necesita deploy.**
+
 ### 340. Comprobante reenviado por el mismo cliente → se reintenta el cruce con el ORIGINAL
 - Owner: "cuando no matchea y después manda de vuelta el mismo comprobante, no le carga
   porque lo toma como duplicado, ¿está bien?". No: el reenvío sigue marcado como duplicado

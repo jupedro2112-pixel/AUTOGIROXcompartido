@@ -2666,7 +2666,7 @@ async function hgcashHandleChargeFailure(movement, comprobante, errMsg, dataDesc
     // La auto-carga falló → el chat va a ABIERTOS para que un agente cargue a mano.
     await _reopenChatForManualCharge(user.id, user.username);
     await _emitAdminOnlyChatNote(user.id, user.username,
-      `🏦 MATCH hgcash — ${dataDesc}\n⚠️ La AUTO-CARGA FALLÓ en la plataforma (${errMsg || 's/detalle'}). ${prefijo}Cargá MANUAL a este usuario por el mismo monto: al hacerlo se marca como usado (no se duplica).`);
+      `🏦 MATCH ${_bankLabel(movement.provider)} — ${dataDesc}\n⚠️ La AUTO-CARGA FALLÓ en la plataforma (${errMsg || 's/detalle'}). ${prefijo}Cargá MANUAL a este usuario por el mismo monto: al hacerlo se marca como usado (no se duplica).`);
   }
 }
 
@@ -2943,7 +2943,7 @@ async function hgcashAutoCarga({ movement, comprobante, mode }) {
   } catch (_) {}
 
   const amount = movement.amount;
-  const opDesc = `op. hgcash ${movement.coelsaCode || movement.externalId || movement.movementId}`;
+  const opDesc = `op. ${_bankLabel(movement.provider)} ${movement.coelsaCode || movement.externalId || movement.movementId}`;
   const dataDesc = `$${Number(amount).toLocaleString('es-AR')} · ${movement.fromName || movement.fromCBU || 's/origen'} · ${opDesc}`;
 
   // Modo sombra: NO cargar, sólo avisar al admin que el match está listo.
@@ -2954,7 +2954,7 @@ async function hgcashAutoCarga({ movement, comprobante, mode }) {
     await Comprobante.updateOne({ id: comprobante.id }, { $set: { bankMatchStatus: 'shadow_matched', matchedMovementId: movement.movementId } });
     await _reopenChatForManualCharge(user.id, user.username);
     await _emitAdminOnlyChatNote(user.id, user.username,
-      `🏦 MATCH hgcash (MODO SOMBRA) — ${dataDesc}\n✅ La transferencia coincide con el comprobante. Lista para cargar (auto-carga DESACTIVADA — cargá vos).`);
+      `🏦 MATCH ${_bankLabel(movement.provider)} (MODO SOMBRA) — ${dataDesc}\n✅ La transferencia coincide con el comprobante. Lista para cargar (auto-carga DESACTIVADA — cargá vos).`);
     logger.info(`[hgcash] shadow match user=${user.username} amount=$${amount} movement=${movement.movementId}`);
     return;
   }
@@ -3236,7 +3236,7 @@ async function hgcashAutoCarga({ movement, comprobante, mode }) {
       await _emitAdminOnlyChatNote(user.id, user.username,
         `🎁 LOTE: se aplicó AUTOMÁTICO el ${_loteHg.pct}%${_loteCapTxt(_loteHg.pct)} (${_loteHg.label}) = $${Number(_loteHgBonus).toLocaleString('es-AR')} en la carga automática de $${Number(amount).toLocaleString('es-AR')}${_loteHg.rolloverX != null ? ' · rollover x' + _loteHg.rolloverX : ''}. ${_loteHg.scope === 'all' ? 'El bono sigue vigente para sus próximas cargas.' : 'Bono consumido (valía una carga).'} No hay que marcar nada.`);
     }
-    await _emitAdminOnlyChatNote(user.id, user.username, `🏦 ✅ CARGA AUTOMÁTICA hgcash — ${dataDesc}. Acreditado.`);
+    await _emitAdminOnlyChatNote(user.id, user.username, `🏦 ✅ CARGA AUTOMÁTICA ${_bankLabel(movement.provider)} — ${dataDesc}. Acreditado.`);
     // Todo automático y OK → no hace falta agente: el chat se cierra por Sistema
     // (si estaba en Abiertos, p.ej. por un intento fallido anterior).
     await _closeChatBySystem(user.id, user.username, 'carga automática acreditada');
@@ -3326,7 +3326,9 @@ async function hgcashMatchFromComprobante(comprobante) {
     // webhook) no es candidato: esa plata ya se cargó a mano en su momento.
     const candidates = await BankMovement.find({
       direction: 'Inbound', matchStatus: 'pending', createdAt: { $gte: since },
-      $or: [{ date: null }, { date: { $exists: false } }, { date: { $gte: since } }]
+      // Solo para GH Wallet: su `paid_at` es ISO con zona. El `date` de hgcash viene como
+      // hora local sin zona (queda 3 h corrido) y NO sirve para filtrar.
+      $or: [{ provider: { $ne: 'ghwallet' } }, { date: null }, { date: { $exists: false } }, { date: { $gte: since } }]
     }).sort({ createdAt: -1 }).limit(80).lean();
 
     // #332: cada movimiento se evalúa con la config de SU banco (un banco apagado
