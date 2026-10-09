@@ -8,6 +8,13 @@
 
 ## Sesión 2026-10-09
 
+### 344. Webhooks salientes: SIN username en el payload
+- Pedido del owner: que el publicista no tenga el usuario exacto de cada persona. `user.username`
+  se quitó del body de TODOS los destinos (no es opcional). El jugador se identifica por
+  `user.id` (UUID interno, opaco, estable); para ubicarlo desde un reporte del publicista se
+  pega el id en el buscador de Usuarios del panel (busca por `id`).
+- Texto de "Copiar formato" y bloque interno actualizados. admin-sw v85.
+
 ### 343. Webhooks salientes: "Copiar formato para pasarle" por destino (sin revelar opcionales)
 - El bloque "Formato del aviso" de la card listaba TODO lo que el sistema puede mandar
   (teléfono, atribución, retiros). El owner no quiere que un publicista que solo recibe

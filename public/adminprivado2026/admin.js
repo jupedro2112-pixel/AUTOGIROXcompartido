@@ -553,7 +553,7 @@ function _whFormatText(d) {
     lines.push('timestamp tiene mas de 5 minutos.\n');
     lines.push('Body:');
     lines.push('  event, event_id, sent_at, site, test');
-    lines.push('  user: { id, username, created_at, campaign, publisher, influencer, source }');
+    lines.push('  user: { id, created_at, campaign, publisher, influencer, source }   (id = identificador unico y estable del jugador)');
     lines.push('  (en primera_carga' + (ev.carga ? ' / carga' : '') + (ev.retiro ? ' / retiro' : '') + ') amount, currency, first_deposit, transaction_id, occurred_at');
     if (f.atribucion) lines.push('  attribution: { fbclid, fbc, fbp, utm_source, utm_medium, utm_campaign, utm_content, utm_term, landing_url, registration_ip }');
     if (f.contacto) lines.push('  contact: { email, phone, phone_verified }');

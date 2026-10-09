@@ -81,9 +81,11 @@ function buildPayload({ event, eventId, user, scope, opts, dest }) {
     sent_at: new Date().toISOString(),
     site: _cfg.publicBaseUrl() || null,
     test: o.test === true,
+    // Sin username (#344): el publicista identifica al jugador por `id` (UUID interno,
+    // opaco y estable; el panel → Usuarios lo busca pegándolo en el buscador). Que no
+    // sepa el usuario exacto de cada persona.
     user: {
       id: u.id || null,
-      username: u.username || null,
       created_at: u.createdAt ? new Date(u.createdAt).toISOString() : null,
       campaign: scope && scope.campaignCode ? scope.campaignCode : (u.acquisitionCampaign || null),
       publisher: scope && scope.publisher ? scope.publisher : null,
@@ -216,7 +218,7 @@ async function _notify(event, user, opts) {
 async function sendTest(dest) {
   const payload = buildPayload({
     event: 'prueba', eventId: 'prueba_' + Date.now(),
-    user: { id: 'test', username: 'usuario_prueba', createdAt: new Date(), acquisitionCampaign: 'PRUEBA', acquisitionSource: 'landing', email: 'prueba@ejemplo.com', phone: '+5491100000000', metaFbc: 'fb.1.1700000000000.AbCdEf', metaFbp: 'fb.1.1700000000000.123456' },
+    user: { id: 'prueba-0000-0000-0000-000000000000', createdAt: new Date(), acquisitionCampaign: 'PRUEBA', acquisitionSource: 'landing', email: 'prueba@ejemplo.com', phone: '+5491100000000', metaFbc: 'fb.1.1700000000000.AbCdEf', metaFbp: 'fb.1.1700000000000.123456' },
     scope: { publisher: 'Publicista de prueba', campaignCode: 'PRUEBA' },
     opts: { amount: 5000, firstDeposit: true, transactionId: 'tx_prueba', test: true }, dest
   });
