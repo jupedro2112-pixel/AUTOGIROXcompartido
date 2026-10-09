@@ -8,6 +8,21 @@
 
 ## Sesión 2026-10-09
 
+### 349. Webhooks: se QUITA el formato "PulWin v1.0" (#347) — no lo usan
+- Confirmado con la prueba real: el receptor de PulWin valida NUESTRO formato y headers
+  (`X-Webhook-Signature`), no los de su PDF; con "PulWin v1.0" respondía 401. Owner: "limpiar
+  lo que no sirve". Se eliminó `format`/`sourceAccountId` del destino, `_buildPulwinPayload` y
+  la rama de headers en `_post`, el select "Formato del aviso" del panel y su texto en "Copiar
+  formato". Queda: nuestro formato + modo de autenticación por destino (#346, default =
+  nuestra firma) + `user.source` = URL completa de origen (#348). admin-sw v89.
+- Causa real de que a PulWin no le llegara el registro/carga de `g1prueba420` (16:51/16:53):
+  el destino estaba tildado para el publicista `martin2026` y el usuario entró por `PULWIN`
+  → filtrado por alcance (no es error de envío: la línea ✅/❌ bajo el destino solo aparece
+  cuando se intentó mandar). Corregido por el owner a `PULWIN` a las 19:56; después de eso
+  los avisos salieron OK.
+- Destinos guardados con `format:'pulwin'` en Config quedan con esa clave ignorada (la
+  normalización ya no la copia; al próximo guardado desaparece).
+
 ### 348. Webhooks: `user.source` = URL completa de origen (pedido de PulWin tras recibir la prueba)
 - Con el secreto cargado de su lado, PulWin ACEPTÓ nuestro formato tal cual (no hizo falta
   el formato v1.0 de #347, que queda disponible por si lo exigen). Pidieron que en `registro`

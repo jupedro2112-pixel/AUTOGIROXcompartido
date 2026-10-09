@@ -71,48 +71,8 @@ function _scopeAllows(dest, scope) {
   return (pub && list.includes(pub)) || (code && list.includes(code));
 }
 
-// ---- Formato PulWin v1.0 (#347) ----------------------------------------------
-// Spec "PulWin_Especificacion_Generica_Webhooks_v1.pdf" (30/09/2026): body propio
-// (schema_version, event player.registered | deposit.first | deposit.recurrent,
-// subject.player_id, deposit{transaction_id, amount, currency, status:'credited'},
-// source_account_id, attribution{source_url, campaign_code}) y headers Webhook-Id /
-// Webhook-Timestamp / Webhook-Signature: v1=<HMAC-SHA256 hex de "ts.body">. Responden
-// 202 queued (ok) / 200 duplicate (ok) / 401 firma / 409 conflicto. No tienen retiros
-// (ese evento se omite). `test:true` solo en el aviso de prueba del panel.
-const PULWIN_EVENTS = { registro: 'player.registered', primera_carga: 'deposit.first', carga: 'deposit.recurrent', prueba: 'player.registered' };
-function _sourceAccountId(dest) {
-  if (dest && dest.sourceAccountId) return String(dest.sourceAccountId);
-  try { return new URL(_cfg.publicBaseUrl()).hostname.replace(/^www\./, '') || 'vipcargas'; } catch (_) { return 'vipcargas'; }
-}
-function _buildPulwinPayload({ event, eventId, user, scope, opts, dest }) {
-  const pwEvent = PULWIN_EVENTS[event];
-  if (!pwEvent) return null; // retiro: PulWin v1.0 no lo contempla
-  const u = user || {}; const o = opts || {};
-  const isDeposit = pwEvent === 'deposit.first' || pwEvent === 'deposit.recurrent';
-  const occurred = isDeposit ? (o.occurredAt ? new Date(o.occurredAt) : new Date()) : (u.createdAt ? new Date(u.createdAt) : new Date());
-  const body = {
-    schema_version: '1.0',
-    event_id: String(eventId).slice(0, 150),
-    event: pwEvent,
-    occurred_at: occurred.toISOString(),
-    source_account_id: _sourceAccountId(dest),
-    test: o.test === true,
-    subject: { lead_id: null, player_id: u.id ? String(u.id) : null },
-    attribution: {
-      source_url: u.landingUrl || null,
-      campaign_code: scope && scope.campaignCode ? scope.campaignCode : (u.acquisitionCampaign || null)
-    }
-  };
-  if (isDeposit) {
-    body.deposit = { transaction_id: String(o.transactionId || eventId), amount: Number(o.amount) || 0, currency: 'ARS', status: 'credited' };
-  }
-  return body;
-}
-
-// Arma el body para un destino (respeta sus opcionales). Devuelve null si el formato del
-// destino no contempla ese evento.
+// Arma el body para un destino (respeta sus opcionales).
 function buildPayload({ event, eventId, user, scope, opts, dest }) {
-  if (dest && dest.format === 'pulwin') return _buildPulwinPayload({ event, eventId, user, scope, opts, dest });
   const u = user || {};
   const o = opts || {};
   const body = {
@@ -166,16 +126,6 @@ function buildPayload({ event, eventId, user, scope, opts, dest }) {
 async function _post(dest, payload) {
   const body = JSON.stringify(payload);
   const ts = String(Math.floor(Date.now() / 1000));
-  if (dest.format === 'pulwin') {
-    const headers = {
-      'Content-Type': 'application/json; charset=utf-8',
-      'User-Agent': 'vipcargas-webhook/1.0',
-      'Webhook-Id': payload.event_id,
-      'Webhook-Timestamp': ts,
-      'Webhook-Signature': 'v1=' + sign(dest.secret || '', ts, body)
-    };
-    return _send(dest.url, body, headers);
-  }
   const headers = {
     'Content-Type': 'application/json',
     'User-Agent': 'vipcargas-webhook/1.0',
@@ -278,7 +228,6 @@ async function _notify(event, user, opts) {
     if (!wants) continue;
     if (!_scopeAllows(dest, scope)) continue;
     const payload = buildPayload({ event: outEvent, eventId: baseId, user: u, scope, opts: o, dest });
-    if (!payload) continue;
     _sendToDest(dest, payload).catch(() => {});
   }
 }
