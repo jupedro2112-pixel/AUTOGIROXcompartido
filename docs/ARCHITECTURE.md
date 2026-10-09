@@ -1061,6 +1061,9 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   El body NO lleva `username` (#344): el jugador va como `user.id` (UUID de `User.id`).
   `auth.mode` por destino (#346): `hmac_ts` | `hmac_body` (+`header`/`prefix`) | `bearer` |
   `header`; lo aplica `_post` del servicio además de los `X-Webhook-*`.
+  `format: 'vip' | 'pulwin'` (#347): con `pulwin` el body y los headers son los de la spec
+  PulWin v1.0 (`_buildPulwinPayload`: player.registered / deposit.first / deposit.recurrent,
+  `Webhook-Signature: v1=…`, `source_account_id` = `sourceAccountId` o hostname); retiro se omite.
   (Diagnóstico de los avisos ENTRANTES de GH Wallet: `GET /api/admin/ghwallet/webhooks`,
   #335. `Config['ghwallet'].chargeOn` = 'verified' | 'paid' (#338): con 'paid' se carga
   en `held` y una reversión posterior descuenta sola (`_autoDebitReversedGhwallet`,

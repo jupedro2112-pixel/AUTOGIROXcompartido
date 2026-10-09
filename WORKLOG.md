@@ -8,6 +8,31 @@
 
 ## Sesión 2026-10-09
 
+### 347. Webhooks salientes: formato "PulWin v1.0" por destino (spec propia del publicista)
+- El publicista mandó `PulWin_Especificacion_Generica_Webhooks_v1.pdf` (30/09/2026): NO es un
+  receptor genérico. Mismo algoritmo de firma que el nuestro (HMAC-SHA256 de `ts.body`) pero
+  headers propios (`Webhook-Id` = event_id, `Webhook-Timestamp`, `Webhook-Signature: v1=<hex>`)
+  y body propio: `schema_version "1.0"`, `event` ∈ player.registered | deposit.first |
+  deposit.recurrent | lead.created, `occurred_at` (fecha real del hecho), `source_account_id`,
+  `test`, `subject{lead_id, player_id}`, `attribution{source_url, campaign_code}`,
+  `deposit{transaction_id, amount, currency, status:'credited'}`. Responde 202 queued / 200
+  duplicate (ok), 401 firma, 409 conflicto. Por eso el 401: buscaba `Webhook-Signature`.
+- Por destino `format: 'vip' | 'pulwin'` + `sourceAccountId` (default hostname del sitio).
+  `_buildPulwinPayload` mapea registro→player.registered (occurred_at = createdAt del user),
+  primera_carga→deposit.first, carga→deposit.recurrent, retiro→se omite (no existe en v1.0),
+  prueba→player.registered con `test:true`. `player_id` = `User.id` (UUID, sin username, #344);
+  `source_url` = `landingUrl` del usuario (requerida por PulWin para asignar por dominio/ruta);
+  `lead_id` null (no tenemos leads separados del registro). `_post` manda sus headers (sin
+  X-Webhook-*); el modo de auth (#346) no aplica a este formato.
+- Panel: select "Formato del aviso" (`whFormat`) + `whSourceAccount`; con PulWin se oculta el
+  selector de auth; la lista muestra "📐 formato PulWin v1.0"; "Copiar formato" describe lo
+  que se le manda según su spec. admin-sw v87.
+- Probado aislado (axios/mongoose stub): headers, `v1=` firma verificable, `Webhook-Id` =
+  `event_id`, deposit.recurrent con deposit{}, retiro → null.
+- Pendiente: 400/401/409 siguen sin reintentarse (PulWin pide conservarlos para revisión; hoy
+  solo quedan en `lastError`). Si el publicista exige "bandeja de fallos con reenvío manual",
+  hacerlo después.
+
 ### 346. Webhooks salientes: modo de autenticación por destino (401 de Pulwin)
 - Con #342 el panel mostró el motivo del 401 de Pulwin: `{"received":false,"error":{"code":
   "UNAUTHORIZED","message":"Firma o conexión inválida"}}`. Es la validación de firma de su

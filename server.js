@@ -3451,6 +3451,11 @@ function _normalizeOutboundDest(d, cur) {
       retiro: events.retiro === true                 // OPCIONAL
     },
     fields: { atribucion: fields.atribucion === true, contacto: fields.contacto === true }, // OPCIONALES
+    // Formato del aviso (#347): 'vip' = el nuestro; 'pulwin' = spec PulWin v1.0 (body y
+    // headers propios, ver outboundWebhookService). `sourceAccountId` = ID estable de
+    // nuestra cuenta emisora para PulWin (default: hostname del sitio).
+    format: d.format === 'pulwin' ? 'pulwin' : (d.format === 'vip' ? 'vip' : (c.format || 'vip')),
+    sourceAccountId: d.sourceAccountId !== undefined ? String(d.sourceAccountId || '').trim().replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 60) || null : (c.sourceAccountId || null),
     // Cómo se autentica el aviso ante el receptor (#346). Siempre van los headers
     // X-Webhook-*; `auth` agrega lo que pide cada plataforma:
     //   hmac_ts   (default) X-Webhook-Signature = HMAC(ts.body)  — nuestro esquema

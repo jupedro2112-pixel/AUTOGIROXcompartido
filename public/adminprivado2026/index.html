@@ -808,6 +808,18 @@ document.addEventListener('change', function (ev) {
                                     <small style="color:#aaa;font-size:11px;">Se guarda cifrado y no se vuelve a mostrar. <a href="#" onclick="webhookGenSecret();return false;" style="color:#d4af37;">Generar uno al azar</a></small>
                                 </div>
                                 <div class="form-group">
+                                    <label>Formato del aviso:</label>
+                                    <select id="whFormat" style="width:100%;" onchange="webhookFormatChanged()">
+                                        <option value="vip">Nuestro formato (JSON con event / user / amount — ver "Formato completo")</option>
+                                        <option value="pulwin">PulWin v1.0 (su especificación: player.registered / deposit.first / deposit.recurrent)</option>
+                                    </select>
+                                    <div id="whPulwinBox" style="display:none;margin-top:8px;">
+                                        <label style="font-size:12px;">source_account_id (ID de nuestra cuenta emisora en PulWin; dejá vacío = dominio del sitio)</label>
+                                        <input type="text" id="whSourceAccount" placeholder="ej. rapidogirox" style="width:100%;">
+                                        <small style="color:#aaa;font-size:11px;">Con PulWin la firma va en sus headers (Webhook-Signature: v1=…) y el body es el suyo: el jugador va como <code>subject.player_id</code> (id interno, sin username), la primera carga como <code>deposit.first</code> y las recargas (si tildás "Cargas") como <code>deposit.recurrent</code>. Los retiros no existen en su spec y no se mandan. El secreto es el mismo que cargás arriba.</small>
+                                    </div>
+                                </div>
+                                <div class="form-group" id="whAuthBox">
                                     <label>Cómo se autentica el aviso (lo que pida la plataforma que recibe):</label>
                                     <select id="whAuthMode" style="width:100%;" onchange="webhookAuthChanged()">
                                         <option value="hmac_ts">Firma HMAC de "{timestamp}.{body}" en X-Webhook-Signature (nuestro formato, default)</option>
