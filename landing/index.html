@@ -231,8 +231,10 @@
   };
   var DEFAULT_SITE = 'original';
   var HOST_TO_SITE = {                               // dominio de la landing → sitio
-    'grupogirox.com': 'original', 'www.grupogirox.com': 'original'
-    // 'landing.rapidogirox.com': 'rapidogirox'
+    'grupogirox.com': 'original', 'www.grupogirox.com': 'original',
+    // autogiroxcomp.com = landing del clon (#345): así el link limpio /CODIGO va a
+    // rapidogirox sin ?s=. Un ?s=CLAVE explícito sigue ganando sobre el dominio.
+    'autogiroxcomp.com': 'rapidogirox', 'www.autogiroxcomp.com': 'rapidogirox'
   };
   var CAMPAIGN_CODE = '';                            // fijo, o vacío = tomar de la URL
   // ====================

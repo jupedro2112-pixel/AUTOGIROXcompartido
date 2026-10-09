@@ -1245,5 +1245,8 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   comunidad es `loadCommunity()` inline → `/api/config/community`). Es MEJORA
   PENDIENTE (reconectar seteando VIP.state desde loadCommunity), no código muerto.
 - **`checkUsernameAvailability` (PWA)**: existe pero no se dispara — mejora pendiente.
-- **vercel.json es un artefacto** de un deploy anterior; el deploy real es AWS EB.
+- **vercel.json (root) es un artefacto** de un deploy anterior; el deploy real es AWS EB.
+  `landing/vercel.json` SÍ se usa: es el rewrite de la landing estática en Vercel para que
+  `/CODIGO` sirva `index.html` (link limpio de pauta, #345); el sitio/backend lo elige
+  `HOST_TO_SITE` de `landing/index.html` por dominio (`autogiroxcomp.com` → rapidogirox).
 - **Env DB_PASSWORD ya no se usa** (sección Base de Datos eliminada 2026-07-09).

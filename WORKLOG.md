@@ -8,6 +8,20 @@
 
 ## Sesión 2026-10-09
 
+### 345. Landing: link limpio `https://www.autogiroxcomp.com/CODIGO` (sin `?p=&s=`)
+- Un publicista (Pulwin) pidió un link sin parámetros para poder camuflarlo. La landing es
+  un sitio ESTÁTICO en Vercel (no el server): `/MARTIN2026` daba el 404 de Vercel porque
+  busca un archivo con ese nombre, antes de que corra el JS (que ya sabía leer el código
+  del path, `resolveCampaign()`).
+- `landing/vercel.json` (nuevo): rewrite `/:code([A-Za-z0-9_-]{3,40})` → `/index.html`
+  (filesystem primero: `demo.html` y los assets se siguen sirviendo tal cual).
+- `landing/index.html`: `HOST_TO_SITE` suma `autogiroxcomp.com` / `www.` → `rapidogirox`,
+  así el link limpio pega al backend del clon sin `?s=`. Un `?s=CLAVE` explícito sigue
+  ganando sobre el dominio (orden real del código: `?s=` > dominio > default).
+- ⚠️ Aplica cuando Vercel redeploya la landing: si el proyecto está conectado a este repo
+  (root directory `landing`) sale con el push; si no, subir `landing/index.html` y
+  `landing/vercel.json` a mano. El link viejo con `?p=` sigue funcionando.
+
 ### 344. Webhooks salientes: SIN username en el payload
 - Pedido del owner: que el publicista no tenga el usuario exacto de cada persona. `user.username`
   se quitó del body de TODOS los destinos (no es opcional). El jugador se identifica por
