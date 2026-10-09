@@ -533,6 +533,39 @@ function _whEvTxt(d) {
     if (ev.carga) out.push('cargas'); if (ev.retiro) out.push('retiros');
     return out.join(' · ');
 }
+// Texto del formato SOLO con lo que ese destino recibe (eventos y campos marcados): es lo
+// que se le pasa al publicista. El bloque genérico de la card lista TODO lo posible y no
+// se comparte (si el publicista ve que podemos mandar teléfono/atribución, lo pide).
+function _whFormatText(d) {
+    const ev = d.events || {}; const f = d.fields || {};
+    const events = ['registro', 'primera_carga']; if (ev.carga) events.push('carga'); if (ev.retiro) events.push('retiro'); events.push('prueba');
+    const lines = [];
+    lines.push('WEBHOOK — ' + (d.name || '') + '\nURL: ' + d.url + '\n');
+    lines.push('Cada aviso es un POST con JSON (Content-Type: application/json).');
+    lines.push('Eventos: ' + events.join(' | ') + ' (el "prueba" es solo para verificar la recepcion).\n');
+    lines.push('Headers:');
+    lines.push('  X-Webhook-Event      tipo de evento');
+    lines.push('  X-Webhook-Id         id unico del evento (si se repite, es un reintento: ignorar)');
+    lines.push('  X-Webhook-Timestamp  unix time en segundos');
+    lines.push('  X-Webhook-Signature  HMAC-SHA256 hex de "{timestamp}.{body crudo}" con el secreto compartido\n');
+    lines.push('Validacion: tomar el body tal cual llega (sin reformatear), armar timestamp + "." + body,');
+    lines.push('calcular HMAC-SHA256 con el secreto y comparar con X-Webhook-Signature. Rechazar si el');
+    lines.push('timestamp tiene mas de 5 minutos.\n');
+    lines.push('Body:');
+    lines.push('  event, event_id, sent_at, site, test');
+    lines.push('  user: { id, username, created_at, campaign, publisher, influencer, source }');
+    lines.push('  (en primera_carga' + (ev.carga ? ' / carga' : '') + (ev.retiro ? ' / retiro' : '') + ') amount, currency, first_deposit, transaction_id, occurred_at');
+    if (f.atribucion) lines.push('  attribution: { fbclid, fbc, fbp, utm_source, utm_medium, utm_campaign, utm_content, utm_term, landing_url, registration_ip }');
+    if (f.contacto) lines.push('  contact: { email, phone, phone_verified }');
+    lines.push('\nResponder 2xx. Con 5xx o timeout se reintenta (hasta 10 veces); con 4xx no se reintenta.');
+    return lines.join('\n');
+}
+async function webhookCopyFormat(id) {
+    const d = _whDests.find(function (x) { return x.id === id; }); if (!d) return;
+    const txt = _whFormatText(d);
+    try { await navigator.clipboard.writeText(txt); showToast('📋 Formato copiado: solo lo que recibe ' + (d.name || 'ese destino'), 'success'); }
+    catch (_) { window.prompt('Copiá el formato:', txt); }
+}
 function _whRenderList() {
     const box = document.getElementById('webhooksList'); if (!box) return;
     if (!_whDests.length) { box.innerHTML = '<span style="color:#aaa;font-size:12px;">Todavía no hay destinos. Agregá uno con "+ Nuevo destino".</span>'; return; }
@@ -551,6 +584,7 @@ function _whRenderList() {
             '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">' +
             '<button type="button" class="btn-secondary btn-small" onclick="webhookEdit(\'' + d.id + '\')">✏️ Editar</button>' +
             '<button type="button" class="btn-secondary btn-small" onclick="webhookTest(\'' + d.id + '\')">📤 Enviar prueba</button>' +
+            '<button type="button" class="btn-secondary btn-small" onclick="webhookCopyFormat(\'' + d.id + '\')" title="Copia el formato con SOLO los eventos y campos marcados para este destino">📋 Copiar formato para pasarle</button>' +
             '<button type="button" class="btn-secondary btn-small" onclick="webhookDelete(\'' + d.id + '\')" style="color:#ff8080;">🗑 Borrar</button>' +
             '</div></div>';
     }).join('');
@@ -649,7 +683,7 @@ async function webhookTest(id) {
         loadWebhooksCard();
     } catch (_) { showToast('Error de conexión', 'error'); }
 }
-window.loadWebhooksCard = loadWebhooksCard; window.webhookEdit = webhookEdit; window.webhookCancel = webhookCancel; window.webhookGenSecret = webhookGenSecret;
+window.loadWebhooksCard = loadWebhooksCard; window.webhookCopyFormat = webhookCopyFormat; window.webhookEdit = webhookEdit; window.webhookCancel = webhookCancel; window.webhookGenSecret = webhookGenSecret;
 window.webhookScopeChanged = webhookScopeChanged; window.webhookSave = webhookSave; window.webhookDelete = webhookDelete; window.webhookTest = webhookTest;
 
 async function checkAdminSession() {

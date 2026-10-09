@@ -8,6 +8,17 @@
 
 ## Sesión 2026-10-09
 
+### 343. Webhooks salientes: "Copiar formato para pasarle" por destino (sin revelar opcionales)
+- El bloque "Formato del aviso" de la card listaba TODO lo que el sistema puede mandar
+  (teléfono, atribución, retiros). El owner no quiere que un publicista que solo recibe
+  registro + primera carga vea que existe el teléfono vinculado ("me lo va a pedir").
+- Nuevo botón por destino **📋 Copiar formato para pasarle** (`webhookCopyFormat` →
+  `_whFormatText(d)`): arma el texto con la URL, headers y firma, y SOLO los eventos y campos
+  marcados para ese destino (sin `attribution`/`contact`/`carga`/`retiro` si no están
+  tildados). Lo copia al portapapeles (fallback: prompt).
+- El bloque genérico quedó como "Formato completo (uso interno)" con aviso de no compartirlo.
+- admin-sw v84.
+
 ### 342. Webhooks salientes: el error muestra lo que respondió el receptor
 - Primer destino real (Pulwin Affiliate, publicista "martin2026") respondió **HTTP 401** a la
   prueba. 401 = el receptor recibió el POST y lo rechazó por autenticación: o no cargó el

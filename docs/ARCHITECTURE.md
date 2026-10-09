@@ -1055,6 +1055,9 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   URL https, alcance TODOS o lista de publicistas (`metaCapi.resolveEventScope`), eventos
   (registro y primera_carga siempre; carga y retiro opcionales) y datos opcionales
   (atribución, mail/teléfono). `GET/POST /api/admin/webhooks`, `DELETE /:id`, `POST /:id/test`.
+  Botón "📋 Copiar formato para pasarle" (#343, `_whFormatText`) arma la spec SOLO con lo
+  marcado para ese destino; el bloque "Formato completo" de la card es interno (no compartir).
+  Un rechazo del receptor guarda `HTTP <code>: <body recortado>` en el error (#342).
   (Diagnóstico de los avisos ENTRANTES de GH Wallet: `GET /api/admin/ghwallet/webhooks`,
   #335. `Config['ghwallet'].chargeOn` = 'verified' | 'paid' (#338): con 'paid' se carga
   en `held` y una reversión posterior descuenta sola (`_autoDebitReversedGhwallet`,
