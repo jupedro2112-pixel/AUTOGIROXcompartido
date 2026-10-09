@@ -868,7 +868,7 @@ Headers: X-Webhook-Event (registro | primera_carga | carga | retiro | prueba)
          X-Webhook-Timestamp (unix, segundos)
          X-Webhook-Signature = HMAC-SHA256 hex de "{timestamp}.{body}" con el secreto
 Body: { "event", "event_id", "sent_at", "site", "test",
-        "user": { "id", "created_at", "campaign", "publisher", "influencer", "source" },   (id = UUID interno; NUNCA va el username)
+        "user": { "id", "created_at", "campaign", "publisher", "influencer", "source", "channel" },   (id = UUID interno, NUNCA va el username; source = URL completa de origen; channel = landing | panel…)
         "amount", "currency", "first_deposit", "transaction_id", "occurred_at",
         "attribution": { "fbclid", "fbc", "fbp", "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "landing_url", "registration_ip" },   (si está marcado)
         "contact": { "email", "phone", "phone_verified" } }   (si está marcado)

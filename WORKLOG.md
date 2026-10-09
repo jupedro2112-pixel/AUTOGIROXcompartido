@@ -8,6 +8,15 @@
 
 ## Sesión 2026-10-09
 
+### 348. Webhooks: `user.source` = URL completa de origen (pedido de PulWin tras recibir la prueba)
+- Con el secreto cargado de su lado, PulWin ACEPTÓ nuestro formato tal cual (no hizo falta
+  el formato v1.0 de #347, que queda disponible por si lo exigen). Pidieron que en `registro`
+  y `primera_carga` vaya la URL completa de origen (dominio + ruta + parámetros) en
+  `user.source`, manteniendo headers y firma.
+- `buildPayload` (formato vip): `user.source` = `User.landingUrl` (la landing manda
+  `location.href`; la PWA `VIP.campaign.getLandingUrl()`); lo que antes iba ahí
+  ('landing' | 'panel'…) pasa a `user.channel`. Textos del formato actualizados. admin-sw v88.
+
 ### 347. Webhooks salientes: formato "PulWin v1.0" por destino (spec propia del publicista)
 - El publicista mandó `PulWin_Especificacion_Generica_Webhooks_v1.pdf` (30/09/2026): NO es un
   receptor genérico. Mismo algoritmo de firma que el nuestro (HMAC-SHA256 de `ts.body`) pero

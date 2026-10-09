@@ -130,7 +130,11 @@ function buildPayload({ event, eventId, user, scope, opts, dest }) {
       campaign: scope && scope.campaignCode ? scope.campaignCode : (u.acquisitionCampaign || null),
       publisher: scope && scope.publisher ? scope.publisher : null,
       influencer: u.acquisitionInfluencer || null,
-      source: u.acquisitionSource || null
+      // `source` = URL COMPLETA de origen (dominio + ruta + parámetros con la que entró el
+      // jugador; la landing manda location.href). Lo pidió PulWin (#348) para asignar el
+      // tráfico por dominio/ruta; antes iba 'landing'/'panel', que ahora es `channel`.
+      source: u.landingUrl || null,
+      channel: u.acquisitionSource || null
     },
     amount: o.amount != null ? Number(o.amount) : null,
     currency: o.amount != null ? 'ARS' : null,
