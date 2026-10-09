@@ -4,7 +4,21 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-08**
+> **Última actualización: 2026-10-09**
+
+## Sesión 2026-10-09
+
+### 342. Webhooks salientes: el error muestra lo que respondió el receptor
+- Primer destino real (Pulwin Affiliate, publicista "martin2026") respondió **HTTP 401** a la
+  prueba. 401 = el receptor recibió el POST y lo rechazó por autenticación: o no cargó el
+  secreto HMAC de su lado, o su webhook "genérico" espera otra forma de auth (Bearer, otro
+  header). Antes el panel solo decía "HTTP 401"; ahora `_post` recorta el body de la respuesta
+  (160 chars, sin HTML) y lo agrega al error → "HTTP 401: invalid signature", etc. Sirve
+  tanto para el toast de "Enviar prueba" como para `lastError` en la cola/stats.
+- Formato de firma que se le pasó al publicista: headers `X-Webhook-Event/Id/Timestamp/
+  Signature`, HMAC-SHA256 hex de `"{timestamp}.{body crudo}"`. Si el receptor necesita otra
+  cosa (Bearer, campos propios tipo click_id), hay que adaptarlo por destino (pendiente de
+  lo que responda Pulwin).
 
 ## Sesión 2026-10-08
 

@@ -131,7 +131,15 @@ async function _post(dest, payload) {
   const resp = await axios.post(dest.url, body, { headers, timeout: POST_TIMEOUT_MS, maxRedirects: 0, validateStatus: () => true });
   if (resp.status >= 200 && resp.status < 300) return { ok: true, status: resp.status };
   const retryable = resp.status >= 500 || resp.status === 408 || resp.status === 429;
-  return { ok: false, status: resp.status, retryable, error: `HTTP ${resp.status}` };
+  // Lo que respondió el receptor (recortado) para que el panel diga POR QUÉ rechazó
+  // (401 "invalid signature" vs "missing token" cambia qué hay que arreglar).
+  let detail = '';
+  try {
+    const d = resp.data;
+    const txt = d == null ? '' : (typeof d === 'string' ? d : JSON.stringify(d));
+    detail = txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+  } catch (_) {}
+  return { ok: false, status: resp.status, retryable, error: `HTTP ${resp.status}${detail ? ': ' + detail : ''}` };
 }
 
 async function _deliver(dest, payload, attemptsSoFar) {
