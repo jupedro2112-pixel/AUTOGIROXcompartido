@@ -543,14 +543,25 @@ function _whFormatText(d) {
     lines.push('WEBHOOK — ' + (d.name || '') + '\nURL: ' + d.url + '\n');
     lines.push('Cada aviso es un POST con JSON (Content-Type: application/json).');
     lines.push('Eventos: ' + events.join(' | ') + ' (el "prueba" es solo para verificar la recepcion).\n');
+    const au = d.auth || {}; const am = au.mode || 'hmac_ts';
     lines.push('Headers:');
     lines.push('  X-Webhook-Event      tipo de evento');
     lines.push('  X-Webhook-Id         id unico del evento (si se repite, es un reintento: ignorar)');
     lines.push('  X-Webhook-Timestamp  unix time en segundos');
-    lines.push('  X-Webhook-Signature  HMAC-SHA256 hex de "{timestamp}.{body crudo}" con el secreto compartido\n');
-    lines.push('Validacion: tomar el body tal cual llega (sin reformatear), armar timestamp + "." + body,');
-    lines.push('calcular HMAC-SHA256 con el secreto y comparar con X-Webhook-Signature. Rechazar si el');
-    lines.push('timestamp tiene mas de 5 minutos.\n');
+    lines.push('  X-Webhook-Signature  HMAC-SHA256 hex de "{timestamp}.{body crudo}" con el secreto compartido');
+    if (am === 'hmac_body') lines.push('  ' + (au.header || 'X-Signature') + '  ' + (au.prefix || '') + 'HMAC-SHA256 hex del body crudo con el secreto compartido');
+    if (am === 'bearer') lines.push('  Authorization        Bearer <token acordado>');
+    if (am === 'header' && au.header) lines.push('  ' + au.header + '  ' + (au.prefix || '') + '<token acordado>');
+    lines.push('');
+    if (am === 'hmac_ts') {
+        lines.push('Validacion: tomar el body tal cual llega (sin reformatear), armar timestamp + "." + body,');
+        lines.push('calcular HMAC-SHA256 con el secreto y comparar con X-Webhook-Signature. Rechazar si el');
+        lines.push('timestamp tiene mas de 5 minutos.\n');
+    } else if (am === 'hmac_body') {
+        lines.push('Validacion: HMAC-SHA256 del body crudo con el secreto, comparar con el header ' + (au.header || 'X-Signature') + '.\n');
+    } else {
+        lines.push('Validacion: comparar el token del header con el acordado.\n');
+    }
     lines.push('Body:');
     lines.push('  event, event_id, sent_at, site, test');
     lines.push('  user: { id, created_at, campaign, publisher, influencer, source }   (id = identificador unico y estable del jugador)');
@@ -573,13 +584,15 @@ function _whRenderList() {
         const st = d.stats;
         const scope = d.scope === 'publishers' ? '👥 ' + escapeHtml((d.publishers || []).join(', ')) : '👥 <b>TODOS</b>';
         const extra = [d.fields && d.fields.atribucion ? 'atribución' : null, d.fields && d.fields.contacto ? 'mail/tel' : null].filter(Boolean).join(' + ');
+        const am = (d.auth && d.auth.mode) || 'hmac_ts';
+        const authTxt = am === 'hmac_body' ? '🔑 HMAC del body en ' + escapeHtml((d.auth.header || 'X-Signature')) : am === 'bearer' ? '🔑 Bearer' : am === 'header' ? '🔑 token en ' + escapeHtml(d.auth.header || '?') : '';
         let last = '';
         if (st && st.lastAt) last = (st.lastOk ? '<span style="color:#66ff99;">✅ último OK</span>' : '<span style="color:#ff8080;">❌ ' + escapeHtml(st.lastError || 'falló') + '</span>') + ' (' + escapeHtml(st.lastEvent || '') + ', ' + fmtFechaHoraAR(st.lastAt) + ') · ' + st.ok + ' ok / ' + st.fail + ' fallos desde el arranque';
         if (d.pending) last += ' · <span style="color:#ffb74d;">' + d.pending + ' en cola</span>';
         if (d.decryptError) last += ' · <span style="color:#ff8080;">⚠️ secreto ilegible (¿cambió JWT_SECRET?): volvé a cargarlo</span>';
         return '<div style="padding:10px;border-radius:8px;background:rgba(255,255,255,0.04);border-left:4px solid ' + (d.enabled ? '#66ff99' : '#777') + ';font-size:12px;line-height:1.6;">' +
             '<div><b>' + escapeHtml(d.name || '(sin nombre)') + '</b> ' + (d.enabled ? '' : '<span style="color:#aaa;">(apagado)</span>') + ' · <code style="font-size:11px;">' + escapeHtml(d.url) + '</code></div>' +
-            '<div>' + scope + ' · 📨 ' + _whEvTxt(d) + (extra ? ' · 🧩 ' + extra : '') + '</div>' +
+            '<div>' + scope + ' · 📨 ' + _whEvTxt(d) + (extra ? ' · 🧩 ' + extra : '') + (authTxt ? ' · ' + authTxt : '') + '</div>' +
             (last ? '<div style="color:#aaa;">' + last + '</div>' : '') +
             '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">' +
             '<button type="button" class="btn-secondary btn-small" onclick="webhookEdit(\'' + d.id + '\')">✏️ Editar</button>' +
@@ -630,9 +643,21 @@ function webhookEdit(id) {
     document.getElementById('whFAtrib').checked = !!(d && d.fields && d.fields.atribucion);
     document.getElementById('whFContacto').checked = !!(d && d.fields && d.fields.contacto);
     document.getElementById('whEnabled').checked = d ? d.enabled !== false : true;
+    const au = (d && d.auth) || {};
+    document.getElementById('whAuthMode').value = au.mode || 'hmac_ts';
+    document.getElementById('whAuthHeader').value = au.header || '';
+    document.getElementById('whAuthPrefix').value = au.prefix || '';
+    webhookAuthChanged();
     const m = document.getElementById('whMsg'); if (m) m.textContent = '';
     ed.style.display = '';
     ed.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function webhookAuthChanged() {
+    const mode = document.getElementById('whAuthMode').value;
+    const extra = document.getElementById('whAuthExtra'); if (!extra) return;
+    const show = mode === 'hmac_body' || mode === 'header';
+    extra.style.display = show ? 'flex' : 'none';
+    const pr = document.getElementById('whAuthPrefix'); if (pr) pr.placeholder = mode === 'header' ? 'ej. Bearer ' : 'ej. sha256=';
 }
 function webhookCancel() { const ed = document.getElementById('webhookEditor'); if (ed) ed.style.display = 'none'; }
 function webhookGenSecret() {
@@ -651,8 +676,10 @@ async function webhookSave() {
         secret: document.getElementById('whSecret').value, scope, publishers,
         events: { registro: true, primera_carga: true, carga: document.getElementById('whEvCarga').checked, retiro: document.getElementById('whEvRetiro').checked },
         fields: { atribucion: document.getElementById('whFAtrib').checked, contacto: document.getElementById('whFContacto').checked },
-        enabled: document.getElementById('whEnabled').checked
+        enabled: document.getElementById('whEnabled').checked,
+        auth: { mode: document.getElementById('whAuthMode').value, header: document.getElementById('whAuthHeader').value.trim(), prefix: document.getElementById('whAuthPrefix').value }
     };
+    if ((body.auth.mode === 'header') && !body.auth.header) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Poné el nombre del header para el token'; } return; }
     if (body.fields.contacto && !confirm('Vas a mandar el MAIL y el TELÉFONO de los usuarios a ' + (body.name || body.url) + '. ¿Confirmás?')) return;
     try {
         const r = await authFetch('/api/admin/webhooks', { method: 'POST', body: JSON.stringify(body) });
@@ -683,7 +710,7 @@ async function webhookTest(id) {
         loadWebhooksCard();
     } catch (_) { showToast('Error de conexión', 'error'); }
 }
-window.loadWebhooksCard = loadWebhooksCard; window.webhookCopyFormat = webhookCopyFormat; window.webhookEdit = webhookEdit; window.webhookCancel = webhookCancel; window.webhookGenSecret = webhookGenSecret;
+window.loadWebhooksCard = loadWebhooksCard; window.webhookCopyFormat = webhookCopyFormat; window.webhookAuthChanged = webhookAuthChanged; window.webhookEdit = webhookEdit; window.webhookCancel = webhookCancel; window.webhookGenSecret = webhookGenSecret;
 window.webhookScopeChanged = webhookScopeChanged; window.webhookSave = webhookSave; window.webhookDelete = webhookDelete; window.webhookTest = webhookTest;
 
 async function checkAdminSession() {

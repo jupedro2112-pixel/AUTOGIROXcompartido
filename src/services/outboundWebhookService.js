@@ -130,6 +130,17 @@ async function _post(dest, payload) {
     'X-Webhook-Timestamp': ts,
     'X-Webhook-Signature': sign(dest.secret || '', ts, body)
   };
+  // Modo de autenticación extra según lo que pide el receptor (#346; ver _normalizeOutboundDest).
+  const auth = dest.auth || {};
+  const secret = dest.secret || '';
+  if (auth.mode === 'hmac_body') {
+    const h = crypto.createHmac('sha256', String(secret)).update(body).digest('hex');
+    headers[auth.header || 'X-Signature'] = (auth.prefix || '') + h;
+  } else if (auth.mode === 'bearer') {
+    headers['Authorization'] = 'Bearer ' + secret;
+  } else if (auth.mode === 'header' && auth.header) {
+    headers[auth.header] = (auth.prefix || '') + secret;
+  }
   const resp = await axios.post(dest.url, body, { headers, timeout: POST_TIMEOUT_MS, maxRedirects: 0, validateStatus: () => true });
   if (resp.status >= 200 && resp.status < 300) return { ok: true, status: resp.status };
   const retryable = resp.status >= 500 || resp.status === 408 || resp.status === 429;

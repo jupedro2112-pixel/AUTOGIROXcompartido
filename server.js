@@ -3451,6 +3451,19 @@ function _normalizeOutboundDest(d, cur) {
       retiro: events.retiro === true                 // OPCIONAL
     },
     fields: { atribucion: fields.atribucion === true, contacto: fields.contacto === true }, // OPCIONALES
+    // Cómo se autentica el aviso ante el receptor (#346). Siempre van los headers
+    // X-Webhook-*; `auth` agrega lo que pide cada plataforma:
+    //   hmac_ts   (default) X-Webhook-Signature = HMAC(ts.body)  — nuestro esquema
+    //   hmac_body <header> = <prefix>HMAC-SHA256 hex del body solo (estilo GitHub/Shopify)
+    //   bearer    Authorization: Bearer <secreto>
+    //   header    <header>: <secreto>  (API key fija)
+    auth: (() => {
+      const a = d.auth && typeof d.auth === 'object' ? d.auth : (c.auth || {});
+      const mode = ['hmac_ts', 'hmac_body', 'bearer', 'header'].includes(a.mode) ? a.mode : 'hmac_ts';
+      const header = String(a.header || '').trim().replace(/[^A-Za-z0-9-]/g, '').slice(0, 60);
+      const prefix = String(a.prefix || '').trim().slice(0, 20);
+      return { mode, header: header || null, prefix: prefix || null };
+    })(),
     createdAt: c.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };

@@ -1059,6 +1059,8 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   marcado para ese destino; el bloque "Formato completo" de la card es interno (no compartir).
   Un rechazo del receptor guarda `HTTP <code>: <body recortado>` en el error (#342).
   El body NO lleva `username` (#344): el jugador va como `user.id` (UUID de `User.id`).
+  `auth.mode` por destino (#346): `hmac_ts` | `hmac_body` (+`header`/`prefix`) | `bearer` |
+  `header`; lo aplica `_post` del servicio además de los `X-Webhook-*`.
   (Diagnóstico de los avisos ENTRANTES de GH Wallet: `GET /api/admin/ghwallet/webhooks`,
   #335. `Config['ghwallet'].chargeOn` = 'verified' | 'paid' (#338): con 'paid' se carga
   en `held` y una reversión posterior descuenta sola (`_autoDebitReversedGhwallet`,

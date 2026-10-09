@@ -8,6 +8,22 @@
 
 ## Sesión 2026-10-09
 
+### 346. Webhooks salientes: modo de autenticación por destino (401 de Pulwin)
+- Con #342 el panel mostró el motivo del 401 de Pulwin: `{"received":false,"error":{"code":
+  "UNAUTHORIZED","message":"Firma o conexión inválida"}}`. Es la validación de firma de su
+  lado (el publicista todavía no había cargado el secreto; y además su "generic webhook"
+  puede calcular la firma distinto de nuestro `HMAC(ts.body)`).
+- Por destino, `auth: { mode, header, prefix }` (`_normalizeOutboundDest`): `hmac_ts`
+  (default, nuestro esquema), `hmac_body` (HMAC-SHA256 hex del body solo en un header a
+  elección, estilo GitHub/Shopify, con prefijo opcional `sha256=`), `bearer`
+  (`Authorization: Bearer <secreto>`), `header` (API key fija en un header a elección).
+  Los headers `X-Webhook-*` van siempre además. Selector en el editor del destino
+  (`whAuthMode/whAuthHeader/whAuthPrefix`, `webhookAuthChanged`); la lista muestra 🔑 si no
+  es el default y "Copiar formato" describe el modo elegido. admin-sw v86.
+- Pendiente del owner: que Pulwin cargue el secreto y diga cómo valida (header + qué firma).
+  El publicista además pidió ver "recurrencias" (recargas): eso es tildar "Cargas" en el
+  destino — decisión del owner (por ahora solo registro + primera carga).
+
 ### 345. Landing: link limpio `https://www.autogiroxcomp.com/CODIGO` (sin `?p=&s=`)
 - Un publicista (Pulwin) pidió un link sin parámetros para poder camuflarlo. La landing es
   un sitio ESTÁTICO en Vercel (no el server): `/MARTIN2026` daba el 404 de Vercel porque

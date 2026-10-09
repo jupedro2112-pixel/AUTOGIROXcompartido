@@ -807,6 +807,20 @@ document.addEventListener('change', function (ev) {
                                     <input type="password" id="whSecret" placeholder="Dejá vacío para no cambiarlo" style="width:100%;" autocomplete="new-password">
                                     <small style="color:#aaa;font-size:11px;">Se guarda cifrado y no se vuelve a mostrar. <a href="#" onclick="webhookGenSecret();return false;" style="color:#d4af37;">Generar uno al azar</a></small>
                                 </div>
+                                <div class="form-group">
+                                    <label>Cómo se autentica el aviso (lo que pida la plataforma que recibe):</label>
+                                    <select id="whAuthMode" style="width:100%;" onchange="webhookAuthChanged()">
+                                        <option value="hmac_ts">Firma HMAC de "{timestamp}.{body}" en X-Webhook-Signature (nuestro formato, default)</option>
+                                        <option value="hmac_body">Firma HMAC-SHA256 del body solo, en un header a elección (estilo GitHub / Shopify)</option>
+                                        <option value="bearer">Token fijo: Authorization: Bearer &lt;secreto&gt;</option>
+                                        <option value="header">Token fijo en un header a elección (API key)</option>
+                                    </select>
+                                    <div id="whAuthExtra" style="display:none;gap:12px;flex-wrap:wrap;margin-top:8px;">
+                                        <div style="flex:1;min-width:200px;"><label style="font-size:12px;">Nombre del header</label><input type="text" id="whAuthHeader" placeholder="ej. X-Signature o X-Api-Key" style="width:100%;"></div>
+                                        <div style="flex:1;min-width:160px;"><label style="font-size:12px;">Prefijo del valor (opcional)</label><input type="text" id="whAuthPrefix" placeholder="ej. sha256=" style="width:100%;"></div>
+                                    </div>
+                                    <small style="color:#aaa;font-size:11px;">Si el receptor responde 401 "firma inválida" aunque ya cargó el secreto, es que calcula la firma de otra forma: pedile cómo (header y qué firma) y elegilo acá. Los headers X-Webhook-* van siempre, además.</small>
+                                </div>
                                 <div style="display:flex;gap:12px;flex-wrap:wrap;">
                                     <div style="flex:1;min-width:240px;">
                                         <div style="font-weight:bold;font-size:13px;margin-bottom:6px;">👥 Recibe los eventos de</div>
