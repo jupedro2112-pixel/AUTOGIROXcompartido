@@ -4,7 +4,33 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-16**
+> **Última actualización: 2026-10-17**
+
+## Sesión 2026-10-17
+
+### 358. Filtro "solo Argentina" de la landing: ahora en VERCEL (el #355 no filtraba la landing real) — réplica del #331 de PAUTANUEVAsantino
+- **Owner:** en PAUTANUEVAsantino probó con VPN en Alemania y la landing se veía igual; pidió
+  replicar el arreglo acá. Causa: la landing que ve la gente (`www.autogiroxcomp.com`) la sirve
+  **Vercel** desde la carpeta `landing/` de este repo (verificado: el HTML en vivo es idéntico byte
+  a byte a `landing/index.html` de HEAD). El middleware del #355 vive en `server.js` (AWS EB) bajo
+  `/landing/`, una ruta por la que nadie entra → nunca se aplicó a la landing real.
+- **Fix (`landing/vercel.json`):** pasa a formato **`routes`**: (1) `/(.*)` → `/blank.html`
+  (página vacía, status 200) cuando el header `x-vercel-ip-country` que Vercel pone en cada
+  request **no es `AR`** (condición `missing` con value); (2) `{"handle":"filesystem"}`; (3) el
+  link limpio `/CODIGO` → `/index.html` del #345, reescrito como regex de `routes`
+  (`^/([A-Za-z0-9_-]{3,40})$`). Sin código: lo resuelve el edge de Vercel; sale con el push.
+  ⚠️ Tiene que ser `routes` y la regla de país ANTES del filesystem: los `rewrites` corren
+  DESPUÉS de buscar el archivo en disco y, como `index.html` existe, se servía igual (probado en
+  PAUTANUEVAsantino desde Tor/Alemania). `routes` no se mezcla con `rewrites/redirects/headers`.
+- El middleware de `server.js` + `geoip-lite` (#355) queda (inofensivo): cubre sólo `/landing/` en EB.
+- ⚠️ Los robots de Meta (revisión de anuncios, preview de links) entran desde EE.UU. → ven la
+  página en blanco. Si Meta rechaza un anuncio por "landing no funcional", agregar una excepción
+  por user-agent (`facebookexternalhit` / `meta-externalads`) en el mismo `vercel.json`.
+- **Probar:** con VPN fuera de AR → página en blanco; desde AR → landing normal; `/CODIGO` y
+  `?p=CODIGO&s=` siguen funcionando.
+- **Deploy a EB:** el zip 15 pesaba 83 MB porque llevaba `node_modules` (creado al instalar
+  `geoip-lite` en #355; `.gitignore` lo excluye y EB corre `npm install` solo) y la subida por Tor
+  se cortaba. Zip limpio con `git archive HEAD` = 2 MB. `node_modules` local borrado.
 
 ## Sesión 2026-10-16
 

@@ -1,5 +1,13 @@
 {
-  "rewrites": [
-    { "source": "/:code([A-Za-z0-9_-]{3,40})", "destination": "/index.html" }
+  "routes": [
+    {
+      "src": "/(.*)",
+      "missing": [
+        { "type": "header", "key": "x-vercel-ip-country", "value": "AR" }
+      ],
+      "dest": "/blank.html"
+    },
+    { "handle": "filesystem" },
+    { "src": "^/([A-Za-z0-9_-]{3,40})$", "dest": "/index.html" }
   ]
 }

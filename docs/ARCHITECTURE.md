@@ -5,7 +5,9 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-13** — widget abre directo en Depositar + pedido
+> Última actualización: **2026-10-17** — filtro "solo Argentina" de la landing movido a
+> Vercel (`landing/vercel.json`, #358, sección "Landing (Vercel)" al final); el middleware
+> de EB del #355 no cubría la landing real. Antes (2026-10-13): widget abre directo en Depositar + pedido
 > silencioso del CBU (#350, §5 dos formas de cargar). Antes (2026-10-08): webhooks salientes a publicistas (#334: §2
 > OutboundWebhookQueue, §5 flujo, §6 card, §9 cron). Antes (2026-10-07): GH Wallet, banco con
 > API paralelo a hgcash (#332: §2 BankMovement, §5 flujo, §9). Antes: cashback instantáneo retirado (#329, §5).
@@ -1299,3 +1301,24 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `notificationRoutes.sendBatchPush` (wrapper de `POST /api/notifications/send-batch`) en chunks;
   `manual:true` = envío a mano registrado por `setPushLogHook`. El `GET` del cronograma suma lotes
   enviados a mano y ocurrencias de ScheduledNotif como ítems de sólo lectura.
+
+## Landing (Vercel) — NO la sirve EB
+
+- La carpeta `landing/` de este repo es la raíz de un proyecto de **Vercel** (dominio
+  `www.autogiroxcomp.com`; el apex redirige con 308 al `www`); se publica sola con cada push a
+  `main`. Es un sitio ESTÁTICO: elige el backend por dominio o `?s=CLAVE` (`SITES` /
+  `HOST_TO_SITE` en `landing/index.html`, #327) y le pega por CORS. Todo lo que sea
+  "comportamiento de la landing" va en `landing/` (HTML o `landing/vercel.json`), NUNCA en rutas
+  `/landing/` de `server.js`: por ahí no entra nadie (error del #355, corregido en #358).
+- **`landing/vercel.json`** está en formato `routes` (no se puede mezclar con `rewrites`):
+  1. `/(.*)` → `/blank.html` (vacía, status 200) cuando el header `x-vercel-ip-country` (lo pone
+     Vercel por IP en cada request) no es `AR` (condición `missing` con value) — **filtro "solo
+     Argentina" (#358)**, para que los bots de otros países no ensucien el tracking. Tiene que ir
+     ANTES de `{"handle":"filesystem"}`: como `rewrite` no funciona porque Vercel sirve el
+     `index.html` existente antes de evaluar la regla.
+  2. `{"handle":"filesystem"}` (assets y `demo.html` tal cual).
+  3. `^/([A-Za-z0-9_-]{3,40})$` → `/index.html`: link limpio `/CODIGO` del #345.
+- El middleware `/landing/` de `server.js` con `geoip-lite` (#355) quedó pero sólo cubre esa ruta
+  en EB (nadie la usa). ⚠️ Los crawlers de Meta (revisión de anuncios / preview) vienen de EE.UU.
+  y ven la página vacía: si Meta rechaza anuncios por eso, agregar excepción por user-agent en el
+  mismo `vercel.json`.

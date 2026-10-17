@@ -78,6 +78,11 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   ghwallet, comprobantes IA, analítica publicistas…). `outboundWebhookService.js` (#334) =
   webhooks salientes a publicistas configurados desde el panel (`Config['outboundWebhooks']`);
   `fbAdsWebhookService.js` es el viejo destino único por SSM (no agregarle features).
+- `landing/` — landing de pauta. ⚠️ **La sirve VERCEL, no EB** (proyecto conectado a este
+  repo, raíz = `landing/`, dominio `www.autogiroxcomp.com`; se publica con el push). Cambios de
+  comportamiento de la landing van en `landing/` (HTML o `landing/vercel.json`, formato
+  `routes`), no en rutas `/landing/` de `server.js` (por ahí no entra nadie — error del #355,
+  corregido en #358).
 - `public/` — PWA del cliente (namespace global `window.VIP`, SW único
   `firebase-messaging-sw.js`). `public/adminprivado2026/` — panel admin (~14k líneas
   de admin.js, cookie httpOnly; su SW es `public/admin-sw.js`, scope /adminprivado2026/).
