@@ -152,7 +152,13 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   permitido siguiente hacia arriba.
 - **Roles:** `user`, `admin` (todo), `depositor` (solo cargas), `withdrawer` (solo
   retiros), `comunidad` (clon de depositor, sin Pagos), `publisher_admin` (solo crea
-  usuarios de su publicista — lockdown via `PUBLISHER_ADMIN_ALLOWED_PATHS`).
+  usuarios de su publicista — lockdown via `PUBLISHER_ADMIN_ALLOWED_PATHS`). **Dueño
+  (2026-10-20, #359)** = admin general con `User.isOwner:true`: lo ÚNICO que ve solo él es
+  PUBLICIDAD (campañas, publicistas, dashboard, influencers, "volvieron por pauta" y el 📣
+  publicista al lado de cada cliente). Endpoint nuevo de publicidad ⇒ `ownerMiddleware`;
+  respuesta con datos de publicista ⇒ `stripPublicity`. Se marca desde COMANDOS → "👑 Dueños"
+  (sin dueños marcados, todo admin general ve Publicidad y puede marcar al primero).
+  Detalle: ARCHITECTURE §3 y §9.
 - **Auth:** JWT por header Authorization O por cookie httpOnly `admin_api_session`
   (el panel admin usa cookie).
 - **Referidos (#307 + #317):** comisión = % × netwin del referido; el % de CADA referidor

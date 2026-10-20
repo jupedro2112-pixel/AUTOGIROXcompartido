@@ -892,6 +892,20 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                             <button type="button" class="btn btn-primary" onclick="saveBonusRollover()">💾 Guardar rollover global</button>
                         </div>
 
+                        <!-- DUEÑOS: quiénes ven PUBLICIDAD (#359; solo admin general ve la card) -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="ownersHeader">
+                            <h3>👑 Dueños (ven Publicidad)</h3>
+                        </div>
+                        <div class="cbu-form" id="ownersForm" style="display:none;">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                Todo lo de <b>PUBLICIDAD</b> (Publicidad, Cuentas Publicistas, Dashboard Publicistas, Volvieron por pauta,
+                                influencers y el nombre del publicista al lado de cada cliente) lo ven <b>solo los dueños</b>. Los demás
+                                admin generales siguen igual para todo lo demás, pero ven a cada cliente como <i>sin publicista</i>.
+                            </p>
+                            <div id="ownersHint" style="font-size:12px;color:#ffb84d;margin:0 0 8px;"></div>
+                            <div id="ownersList" style="display:flex;flex-direction:column;gap:6px;"></div>
+                        </div>
+
                         <!-- 🪦 #329: acá vivía la card "📉 Cashback instantáneo (tipo Stake)" (#254). Retirada por el owner. -->
 
                         <!-- Código de bienvenida de la Comunidad (bono sorpresa) -->
