@@ -53,8 +53,9 @@
   Publicistas, Volvieron por pauta) y `switchSection` los rechaza. Los loaders de publicidad
   solo corren al entrar a esas secciones, así que un admin sin permiso no dispara 403 al arrancar.
 - **Validado:** `node --check` OK (server.js, User.js, admin.js, admin-sw); HTML balanceado.
-  Sin runtime. ⚠️ La carpeta local NO era un clon git (sin `.git`): los cambios quedaron en
-  disco; hay que commitear/pushear desde un clon. **Back + panel necesitan redeploy.** PROBAR:
+  Sin runtime. (La carpeta local en Tails era un `git archive` sin `.git`; se le adjuntó el
+  `.git` de un clon fresco de `main`, cuyo árbol era idéntico, para poder commitear.)
+  **Back + panel necesitan redeploy.** PROBAR:
   (1) deploy → COMANDOS → card 👑 con aviso "no hay dueño"; marcar la cuenta del owner → el
   sidebar sigue mostrando Publicidad; (2) entrar con un encargado (admin general) → sin
   Publicidad / Cuentas Publicistas / Dashboard / Volvieron por pauta en el sidebar, la lista de
