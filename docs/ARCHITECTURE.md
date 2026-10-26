@@ -5,10 +5,10 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-26** — réplica de PICA ROJA tandas 1 y 2: interruptores de
+> Última actualización: **2026-10-26** — réplica de PICA ROJA tandas 1 a 3: interruptores de
 > funciones (`featureFlags`, `Config['features']`, todo OFF), registro `open|invite`, sistema de
-> notificaciones anterior gateado por `legacyNotifs`, Alertas de estafa y Datos IA (§7, §10, §10.1;
-> WORKLOG #360, #361).
+> notificaciones anterior gateado por `legacyNotifs`, Alertas de estafa, Datos IA e Historias (§7, §10,
+> §10.1, §10.2; WORKLOG #360–#362).
 > Antes (2026-10-20): PUBLICIDAD solo para DUEÑOS (`User.isOwner`,
 > `ownerMiddleware`, `stripPublicity`, card 👑 en COMANDOS; §3, §9; WORKLOG #359).
 > Antes (2026-10-17): filtro "solo Argentina" de la landing movido a
@@ -1146,6 +1146,7 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 | `_processNotifBatchQueue` (lotes con regalo) | 45 s + kick al crear | activo | claim atómico por destinatario (`delivery:null → 'sending'`), reference `vip-nbatch-*` |
 | `_expireDailyRoulettePct` | 15 min (+ lazy en claim/status) | activo — vence el % EXTRA de la ruleta diaria a las 24 h (#305) | update condicional, idempotente |
 | `_runMonthlyReferralPayout` | 1 h (+5 min tras el arranque) | activo — paga referidos del mes anterior el día 1 (#307) | Config `referral_autorun_<YYYY-MM>` con `$setOnInsert` → una sola instancia; servicio incremental |
+| `_storyAutoTick` / `_storiesRepeatTick` (#362) | 5 min (+2 min tras el arranque) / 1 h | **sólo con `features.stories` ON** — historias automáticas del día + republicación semanal de las manuales | `Story.autoKey` único sparse (`sa-<día>-<slot>`) |
 
 Migraciones one-shot: patrón flag en Config (`migration_*_done`) en `initializeData()`.
 El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
@@ -1380,3 +1381,24 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `getDailyRouletteConfig` (cada uno en try/catch). `POST /api/activity/ping` (rol user) arma las sesiones y escribe
   `lastDevice`/`deviceIds`; apagado ⇒ `{ok:false, off:true}`. Cliente: `public/js/activity.js` + `window.VIP_DEVICE`
   (index.html); el `mode` del ping es `localStorage.vip_deposit_mode`.
+
+### 10.2 Historias (#362)
+
+- Modelo `Story` (`src/models/Story.js`; `autoKey` único sparse, `mediaData` y `autoImg` con `select:false`; vencen por
+  `expiresAt` pero quedan en el panel). `User.storyBonus`.
+- Rutas cliente: `GET /api/stories/public` (sin sesión), `GET /api/stories/active` (`off:true` si está apagado),
+  `POST /api/stories/:id/view|click|react`, `GET /api/stories/:id/auto.svg|media`, `POST /api/stories/:id/claim-bonus`,
+  `GET /api/stories/bonus`. Admin: `/api/admin/stories*`, `/api/admin/stories-autopilot*` (admin general). Gate `_storiesGate`.
+- Motor: `_storyAutoTick` (5 min), `_storiesRepeatTick` (1 h); plan del día = `storyAuto.planDay(dayKey, matches, ctx)`
+  (`ctx.firstPct` = % del bono de 1ª carga si está prendido); fotos = `storyImage.renderSvg(spec)` servidas en `/auto.svg`
+  (CSP estricta). `STORY_IMG_VER` fuerza rearmar las fotos. Config: `storiesConfig`, `storyAutoMatches`,
+  `storyGamesSnapshot`, `storyAutoDiag`.
+- **Bono de historia en la carga:** un eslabón más de la cadena "un bono automático por carga" (§5): ruleta → 1ª carga →
+  **historia** → lote. Helpers `claimStoryBonus` / `revertStoryBonus` / `settleStoryBonus` (mismo contrato que los del
+  lote), monto `computeAutoBonus` (tope global), rollover global, Transaction 'bonus' con `metadata.source 'story_bonus'`
+  vía `_recordAppliedBonusTx`. Está cableado en la carga manual (`_storyClaim`) y en `hgcashAutoCarga` (`_storyHg`); un
+  flujo de carga NUEVO tiene que repetir ese patrón.
+- PWA: `public/js/stories.js` (`VIP.stories = {init, load, loadPublic, open, openById, claimBonus, close, …}`), botón
+  `#navHistorias` (header), anillo `#lgStoriesRing` (ingreso, disparado desde `VIP.applyAccessFlags`), visor `#storyViewer`;
+  CSS en `chat.css` y `login.css`. Links `app:*` → funciones del widget del casino (`casinoBotGo`, `openRewardsHub`…).
+  El SW reenvía `data.url` de la push (`{type:'vip-open', url}`) o la abre si no hay ventana.

@@ -593,6 +593,9 @@ const userSchema = new mongoose.Schema({
   // altera canjes ya hechos.
   welcomeCodeBonusType: {
     type: String,
+  // #362 HISTORIA CON BONO (réplica #742 de PICA ROJA): +pct% reclamado desde una historia, se aplica en la PRÓXIMA carga
+  // (server: _pendingBonusFor / _consumeStoryBonus) mientras no venza (expiresAt = fin del bono de la historia).
+  storyBonus: { storyId: { type: String, default: null }, pct: { type: Number, default: 0 }, label: { type: String, default: null }, claimedAt: { type: Date, default: null }, expiresAt: { type: Date, default: null } },
     enum: ['cash', 'next_charge', null],
     default: null
   },

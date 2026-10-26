@@ -211,7 +211,11 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   del menú del panel lleva `data-feature="x"`. El sistema de notificaciones automáticas ANTERIOR (reglas, encuesta,
   `ScheduledNotif`) corre sólo con `legacyNotifs` ON. El registro es `Config['registrationMode']` `'open'|'invite'`
   (`_inviteOnlyBlocks`; también en el envío del OTP) y se SUMA al interruptor "📵 SMS y registro" del #322 (apagado
-  ahí ⇒ nadie se registra, sea cual sea el modo).
+  ahí ⇒ nadie se registra, sea cual sea el modo). **Historias (#362):** `Story` + `storyAutopilot`/`storyImage`; el
+  bono "+X%" de una historia es UN eslabón más de la cadena "un bono automático por carga" (ruleta → 1ª carga →
+  **historia** → lote) con el contrato del lote (`claimStoryBonus`/`revertStoryBonus`/`settleStoryBonus`, source
+  `story_bonus`), cableado en la carga manual y en `hgcashAutoCarga`: un flujo de carga nuevo repite ese patrón. En el
+  panel `deleteStory`/`loadStories` son de las historias de INFLUENCERS: las de la app se llaman `*AppStory`.
 
 - **Lotes y Cronograma (#356):** el POST `/api/admin/notif-batches` es un wrapper de
   `_createNotifBatchFromBody(body, user)`; cualquier validación/efecto nuevo del lote va en esa

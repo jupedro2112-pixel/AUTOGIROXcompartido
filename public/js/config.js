@@ -59,6 +59,8 @@ VIP.applyAccessFlags = function (flags) {
     h.classList.toggle('sms-off', !VIP.flags.sms);
     h.classList.toggle('signup-off', !VIP.flags.signup);
     VIP.applyRegistrationMode(); // #360
+    // #362: historias públicas en la pantalla de ingreso (anillo), sólo con la función prendida
+    try { if (VIP.flags.stories && VIP.stories && VIP.stories.loadPublic) VIP.stories.loadPublic('lgStoriesRing'); } catch (_) {}
     try { localStorage.setItem('vip_access_flags', JSON.stringify(VIP.flags)); } catch (e) {}
     try { if (VIP.auth && VIP.auth.refreshVerifyPhoneBanner) VIP.auth.refreshVerifyPhoneBanner(); } catch (e) {}
 };

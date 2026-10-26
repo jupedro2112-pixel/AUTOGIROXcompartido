@@ -1,0 +1,629 @@
+/* Chat Screen */
+.chat-screen {
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Chat Section */
+.chat-section {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.chat-container {
+    flex: 1;
+    /* Piso de altura: aunque el dashboard esté todo desplegado en un celular
+       bajito, el chat SIEMPRE queda visible (el panel del home cede y scrollea
+       adentro — ver #homePanel en index.html). */
+    min-height: 170px;
+    /* Fondo estilo WhatsApp: el patrón de garabatos, en mosaico.
+       La imagen viene casi blanca; el `background-color` beige + `multiply` la
+       tiñe al tono de WhatsApp sin necesitar una segunda imagen. Así el mismo
+       archivo sirve aunque después se quiera cambiar el tono. */
+    background-color: #efeae2;
+    background-image: url('/img/chat-bg-light.webp');
+    background-repeat: repeat;
+    background-size: 380px auto;
+    background-blend-mode: multiply;
+    border: none;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    margin: 0;
+}
+
+.chat-messages {
+    flex: 1;
+    padding: 12px 9px 14px 9px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    scroll-behavior: smooth;
+}
+
+.message-wrapper {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    position: relative;
+    width: 100%;
+}
+
+.message-wrapper.sent {
+    justify-content: flex-end;
+}
+
+.message-wrapper.received {
+    justify-content: flex-start;
+}
+
+.message {
+    max-width: 78%;
+    min-width: 90px;
+    padding: 7px 10px 20px 10px;  /* espacio abajo-derecha para la hora */
+    border-radius: 8px;
+    position: relative;
+    word-wrap: break-word;
+    box-sizing: border-box;
+    width: fit-content;
+    font-size: 14.5px;
+    line-height: 1.4;
+    box-shadow: 0 1px 0.5px rgba(0,0,0,0.13);
+}
+
+.message > div {
+    min-width: 60px;
+    /* Reserva a la derecha de la última línea para que el texto no se meta
+       debajo de la hora. */
+    padding-right: 42px;
+}
+
+/* Mensajes DEL AGENTE (los que recibe el cliente) → blancos, a la izquierda.
+   ⚠️ El nombre de la clase engaña: `usuario` = lo que ve el usuario, no lo que
+   escribe. Lo que escribe el cliente es `.agente` (ver chat.js:57). */
+.message.usuario {
+    background: #ffffff;
+    color: #111b21;
+    align-self: flex-start;
+    margin-right: auto;
+    border-top-left-radius: 0;   /* la "colita" del lado del que habla */
+}
+
+/* Mensajes PROPIOS del cliente → verde claro, a la derecha. */
+.message.agente {
+    background: #d9fdd3;
+    color: #111b21;
+    align-self: flex-end;
+    margin-left: auto;
+    border-top-right-radius: 0;
+}
+
+.message img {
+    max-width: 200px;
+    max-height: 200px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.message img:hover {
+    transform: scale(1.05);
+}
+
+/* Links clickeables en el chat */
+.chat-link {
+    color: #027eb5;
+    text-decoration: underline;
+    word-break: break-all;
+}
+
+.chat-link:hover {
+    color: #81d4fa;
+    text-decoration: none;
+}
+
+.message.agente .chat-link {
+    color: #b3e5fc;
+}
+
+.message.agente .chat-link:hover {
+    color: #e1f5fe;
+}
+
+/* Lightbox para imágenes */
+.lightbox {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 10000;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+}
+
+.lightbox.active {
+    display: flex;
+}
+
+.lightbox img {
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+    border-radius: 10px;
+    cursor: default;
+}
+
+.lightbox-close {
+    position: absolute;
+    top: max(20px, env(safe-area-inset-top, 20px));
+    right: 30px;
+    font-size: 40px;
+    color: #fff;
+    cursor: pointer;
+    background: none;
+    border: none;
+    z-index: 10001;
+}
+
+.lightbox-close:hover {
+    color: #ff4444;
+}
+
+/* La hora va ANCLADA abajo a la derecha DENTRO de la burbuja, como WhatsApp
+   (por eso .message tiene padding-bottom extra). */
+.message-time {
+    position: absolute;
+    right: 9px;
+    bottom: 4px;
+    font-size: 11px;
+    color: #667781;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+/* Tildes de los mensajes PROPIOS del cliente, como WhatsApp: ✓✓ gris = enviado,
+   ✓✓ celestes = un admin abrió el chat y los leyó. El celeste es el MISMO tono
+   que usa WhatsApp para el "leído" (#53bdeb). El flip en vivo lo hace socket.js
+   (evento messages_read_by_admin). */
+.msg-ticks {
+    display: inline-flex;
+    align-items: center;
+    color: #8696a0;
+}
+
+.msg-ticks svg { display: block; }
+
+.msg-ticks.msg-read { color: #53bdeb; }
+
+.copy-btn {
+    background: rgba(0, 0, 0, 0.08);
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+}
+
+.message-wrapper:hover .copy-btn {
+    opacity: 1;
+}
+
+.copy-btn:hover {
+    background: rgba(0, 0, 0, 0.18);
+    transform: scale(1.1);
+}
+
+/* Chat Input — réplica de la barra de WhatsApp (foto de referencia del owner):
+   fondo beige, input pill blanco, íconos de trazo fino SIN fondo. */
+.chat-input-container {
+    flex: 0 0 auto;
+    padding: 7px 8px;
+    padding-bottom: max(7px, env(safe-area-inset-bottom, 7px));
+    border-top: none;
+    background: #f0ebe3;   /* beige de la barra de WhatsApp mobile */
+    z-index: 999;
+}
+
+.chat-input {
+    display: flex;
+    /* Con letra del sistema muy grande, los botones ocupan de más y el cuadro
+       de escribir queda aplastado. flex-wrap permite que el textarea baje a su
+       propia línea (ancho completo) en lugar de quedar diminuto. */
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.action-btn {
+    width: 45px;
+    height: 45px;
+    border: none;
+    border-radius: 50%;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+.deposit-btn {
+    background: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
+    color: #000;
+}
+
+.deposit-btn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+}
+
+.withdraw-btn {
+    background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%);
+    color: #fff;
+}
+
+.withdraw-btn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 20px rgba(255, 68, 68, 0.5);
+}
+
+/* Íconos de la barra al estilo WhatsApp: trazo fino, SIN fondo ni círculo.
+   (Los usan #cbuChatBtn y #attachBtn — el color va por `currentColor` del SVG.) */
+.wa-icon-btn {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 46px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: #1b1b1b;          /* casi negro, como los íconos de la foto */
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;  /* deja poner una mini-etiqueta bajo el ícono (CBU) */
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    transition: transform 0.15s ease, color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.wa-icon-btn:hover { color: #000; }
+.wa-icon-btn:active { transform: scale(0.88); }
+
+/* Mini-etiqueta bajo el ícono ("CBU"): para que se sepa qué es el botón. */
+.wa-btn-label {
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    line-height: 1;
+}
+
+/* Botón de modo claro/oscuro: en la cabecera del chat, a la vista (es el que
+   empuja el bloque de botones al borde derecho con margin-left:auto). */
+.theme-topbar-btn {
+    margin-left: auto;
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    font-size: 17px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.theme-topbar-btn:active { transform: scale(0.92); }
+
+/* Campanita de notificaciones en la cabecera (movida del menú ☰, 2026-08-05).
+   Estados: .active = notificaciones andando (verde), .blocked = bloqueadas (rojo). */
+.notif-topbar-btn {
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    font-size: 17px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 7px;
+}
+.notif-topbar-btn:active { transform: scale(0.92); }
+.notif-topbar-btn.active { background: rgba(0, 255, 136, 0.22); box-shadow: 0 0 8px rgba(0, 255, 136, 0.45); }
+.notif-topbar-btn.blocked { background: rgba(255, 80, 80, 0.25); }
+
+/* Botón Fueguito (racha diaria): en la CABECERA del chat, a la derecha —
+   fuera de la barra de escribir para que esa quede 100% WhatsApp. */
+.fire-topbar-btn {
+    margin-left: 7px;        /* el empuje a la derecha lo hace .theme-topbar-btn */
+    flex-shrink: 0;
+    width: 42px;
+    height: 42px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: visible;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.fire-topbar-btn:active { transform: scale(0.92); }
+
+/* Badge con el número de racha, en la esquina del botón. */
+.fire-streak-badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    background: #fff;
+    color: #ff4500;
+    border-radius: 9px;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 18px;
+    text-align: center;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.withdraw-row-btn {
+    display: block;
+    width: auto;
+    margin: 7px 8px;
+    background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    box-shadow: 0 2px 9px rgba(255, 68, 68, 0.4);
+}
+
+.withdraw-row-btn:active {
+    transform: scale(0.99);
+}
+
+#messageInput {
+    flex: 1;
+    /* Piso de ancho usable: si no entra (letra grande), .chat-input lo baja a
+       su propia línea en vez de dejarlo diminuto. Con letra normal no se nota. */
+    min-width: 90px;
+    padding: 11px 16px;
+    border: none;
+    border-radius: 22px;
+    background: #ffffff;
+    color: #111b21;
+    font-size: 15px;
+    resize: none;
+    min-height: 44px;
+    max-height: 100px;
+    font-family: inherit;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+}
+#messageInput::placeholder { color: #8696a0; }
+
+#messageInput:focus {
+    outline: none;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.08);
+}
+
+/* Botón de enviar: círculo verde WhatsApp. */
+.send-btn {
+    background: #00a884;
+    color: #fff;
+    border: none;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 17px;
+    font-weight: bold;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease;
+}
+
+.send-btn:hover { background: #017561; }
+.send-btn:active { transform: scale(0.95); }
+
+.chat-date-separator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 0;
+    margin: 8px 0;
+}
+
+.chat-date-separator span {
+    background: #ffffff;
+    color: #54656f;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 13px;
+    border-radius: 7px;
+    text-transform: capitalize;
+    letter-spacing: 0.2px;
+    border: none;
+    box-shadow: 0 1px 0.5px rgba(0,0,0,0.13);
+}
+
+/* ============================================================
+   CABECERA DEL CHAT (estilo WhatsApp)
+   ============================================================ */
+.chat-topbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 9px 13px;
+    background: #075e54;          /* verde WhatsApp */
+    color: #fff;
+}
+
+.chat-topbar-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #0b7d6e;
+    flex-shrink: 0;
+}
+
+.chat-topbar-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;               /* deja que el nombre se recorte en vez de empujar */
+}
+
+.chat-topbar-name {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-topbar-status {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    opacity: 0.9;
+}
+
+/* Puntito verde de "en línea". Es decorativo (no es un estado real de conexión
+   del agente): el soporte atiende 24/7, así que se muestra fijo. */
+.chat-topbar-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #25d366;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+/* ============================================================
+   MODO OSCURO (se activa con .wa-dark en <body>; ver ui.js)
+   ============================================================
+   Sólo afecta al CHAT. El menú/dashboard queda igual en los dos modos. */
+body.wa-dark .chat-container {
+    /* La imagen oscura ya viene con el tono correcto: no se tiñe (blend normal),
+       si no `multiply` la dejaría negra del todo y se perderían los garabatos. */
+    background-color: #0b141a;
+    background-image: url('/img/chat-bg-dark.webp');
+    background-repeat: repeat;
+    background-size: 380px auto;
+    background-blend-mode: normal;
+}
+
+body.wa-dark .chat-topbar { background: #1f2c33; }
+
+body.wa-dark .message.usuario {          /* mensajes del agente */
+    background: #202c33;
+    color: #e9edef;
+}
+
+body.wa-dark .message.agente {           /* mensajes propios */
+    background: #005c4b;
+    color: #e9edef;
+}
+
+body.wa-dark .message-time { color: #8696a0; }
+
+body.wa-dark .chat-date-separator span {
+    background: #182229;
+    color: #8696a0;
+}
+
+body.wa-dark .chat-input-container { background: #1f2c33; }
+
+body.wa-dark #messageInput {
+    background: #2a3942;
+    color: #e9edef;
+}
+body.wa-dark #messageInput::placeholder { color: #8696a0; }
+
+/* Íconos de la barra en oscuro: gris claro sobre la barra, como WhatsApp dark. */
+body.wa-dark .wa-icon-btn { color: #aebac1; }
+body.wa-dark .wa-icon-btn:hover { color: #e9edef; }
+
+body.wa-dark .fire-topbar-btn { background: rgba(255, 255, 255, 0.08); }
+
+body.wa-dark .chat-link { color: #53bdeb; }
+
+body.wa-dark .copy-btn { background: rgba(255,255,255,0.12); }
+body.wa-dark .copy-btn:hover { background: rgba(255,255,255,0.22); }
+
+body.wa-dark #typingIndicator { color: #8696a0 !important; }
+
+/* ============================================================
+   INTERRUPTOR del modo oscuro (Configuración)
+   ============================================================ */
+.wa-switch { position: relative; display: inline-block; flex-shrink: 0; cursor: pointer; }
+.wa-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+
+.wa-switch-track {
+    display: block;
+    width: 46px;
+    height: 26px;
+    background: rgba(255,255,255,0.18);
+    border-radius: 13px;
+    transition: background 0.2s ease;
+}
+
+.wa-switch-thumb {
+    display: block;
+    width: 20px;
+    height: 20px;
+    margin: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+}
+
+.wa-switch input:checked + .wa-switch-track { background: #00a884; }
+.wa-switch input:checked + .wa-switch-track .wa-switch-thumb { transform: translateX(20px); }
+/* Foco visible por teclado (accesibilidad): sin esto el switch es inalcanzable
+   para quien no usa mouse. */
+.wa-switch input:focus-visible + .wa-switch-track { outline: 2px solid #d4af37; outline-offset: 2px; }
