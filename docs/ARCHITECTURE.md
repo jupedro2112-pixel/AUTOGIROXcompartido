@@ -5,10 +5,10 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-26** — réplica de PICA ROJA tandas 1 a 3: interruptores de
+> Última actualización: **2026-10-26** — réplica de PICA ROJA (4 tandas): interruptores de
 > funciones (`featureFlags`, `Config['features']`, todo OFF), registro `open|invite`, sistema de
-> notificaciones anterior gateado por `legacyNotifs`, Alertas de estafa, Datos IA e Historias (§7, §10,
-> §10.1, §10.2; WORKLOG #360–#362).
+> notificaciones anterior gateado por `legacyNotifs`, Alertas de estafa, Datos IA, Historias, Centro de
+> avisos y piloto automático (§7, §10–§10.3; WORKLOG #360–#363).
 > Antes (2026-10-20): PUBLICIDAD solo para DUEÑOS (`User.isOwner`,
 > `ownerMiddleware`, `stripPublicity`, card 👑 en COMANDOS; §3, §9; WORKLOG #359).
 > Antes (2026-10-17): filtro "solo Argentina" de la landing movido a
@@ -1147,6 +1147,10 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 | `_expireDailyRoulettePct` | 15 min (+ lazy en claim/status) | activo — vence el % EXTRA de la ruleta diaria a las 24 h (#305) | update condicional, idempotente |
 | `_runMonthlyReferralPayout` | 1 h (+5 min tras el arranque) | activo — paga referidos del mes anterior el día 1 (#307) | Config `referral_autorun_<YYYY-MM>` con `$setOnInsert` → una sola instancia; servicio incremental |
 | `_storyAutoTick` / `_storiesRepeatTick` (#362) | 5 min (+2 min tras el arranque) / 1 h | **sólo con `features.stories` ON** — historias automáticas del día + republicación semanal de las manuales | `Story.autoKey` único sparse (`sa-<día>-<slot>`) |
+| `_refundReminderTick` (#363) | 15 min (+6 min), 11–21 h ART | **sólo con `features.notifCenter` ON** — push "reclamá tu reembolso" diario / semanal (lun y jue) / mensual (1 y 8) | `_cronClaim('refundremind')` + slots en `Config['refundRemindLast']` |
+| `_journeyTick` (#363) | 20 min (+7 min), 17–19 h ART, 1 vez/día | **sólo con `features.notifCenter` ON** — recorrido de retención: un lote por paso vía `_createNotifBatchFromBody` (⚠️ regala plata real) | `_cronClaim('journey')` + `Config['journeyLast'].day` + `dailyCap:1` |
+| `_weeklyReviewTick` (#363) | 30 min (+11 min), lunes 10–14 h ART | **sólo con `features.notifCenter` ON** — mide la semana y ajusta `Config['journeyTuning']` | `_cronClaim('weeklyreview')` + `weeklyReview.weekKey` |
+| `_autopilotTick` (#363) | 3 h (+5 min) | **sólo con `features.autopilot` ON** — pre-programa `ScheduledCampaign` del mes en curso y el siguiente (las corre `_schedTick`) | `ScheduledCampaign.autoKey` único sparse (`ap-YYYY-MM-DD`) |
 
 Migraciones one-shot: patrón flag en Config (`migration_*_done`) en `initializeData()`.
 El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
@@ -1402,3 +1406,21 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `#navHistorias` (header), anillo `#lgStoriesRing` (ingreso, disparado desde `VIP.applyAccessFlags`), visor `#storyViewer`;
   CSS en `chat.css` y `login.css`. Links `app:*` → funciones del widget del casino (`casinoBotGo`, `openRewardsHub`…).
   El SW reenvía `data.url` de la push (`{type:'vip-open', url}`) o la abre si no hay ventana.
+
+### 10.3 Centro de avisos y piloto automático (#363)
+
+- **Audiencia de lotes:** `_resolveNotifBatchAudience` = wrapper (`appOnly`, `monthlyCap`, `dailyCap`, `rotGroup`) sobre
+  `_resolveNotifBatchAudienceBase` (el resolver de siempre: segment/list/all/inactive). `NotifBatch.giftType 'none'` = sólo
+  aviso (ya existía, #264). Preferencias: `User.notifPrefs` (`prefsFilter`/`bumpFatigue` en notificationService;
+  `sendPushIfOffline` mira `data.kind`; `_processNotifBatchRecipient` manda `kind` y suma fatiga). Fatiga ⇒
+  `/api/activity/ping` la resetea.
+- **Recorrido:** `retentionJourney.{classify,pickStep,render,batchBody}`; motor `_journeyScan`/`_journeyTick`; panel
+  `/api/admin/notif-center` (GET/PUT/run). Config `notifCenter {monthlyCap, journey, refundReminder}`, `journeyTuning`, `journeyLast`.
+- **Avisos del reembolso:** `_refundRemindPlan/_refundRemindRun/_refundReminderTick` (periodKey igual al del reclamo:
+  `daily:YYYY-MM-DD`, `weekly:<lunes>`, `monthly:YYYY-MM`). Push `url:'/?open=refund'` ⇒ `app.js` abre Reembolso.
+- **Revisión semanal:** `_weeklyMetrics` (regalado/depositado directo de `Transaction`, sin `DailyClose`) + `weeklyReview.decide`
+  ⇒ `journeyTuning`; informe en `Config['weeklyReview']`; rutas `/api/admin/weekly-review` (+`/run`).
+- **Piloto:** `getAutopilotConfig` (fijo: 19:00, 4 h, 3 tandas/30 min, tope 8 o el del Centro), `_autopilotMonthItems(Raw)`,
+  `_autopilotProgramMonth`, `_autopilotClearFuture`, `_autopilotTick`; ruta `/api/admin/cronograma-autopilot`. Las campañas
+  las ejecuta `_schedTick` como cualquier otra (`payload` → `SCHED_ADAPTER.createBatch` → `_createNotifBatchFromBody`).
+- Locks multi-instancia: `_cronClaim(name, ttl)` sobre `Config['cronlock_<name>']` (fail-open).

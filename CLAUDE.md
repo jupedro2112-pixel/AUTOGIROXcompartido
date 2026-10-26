@@ -215,7 +215,10 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   bono "+X%" de una historia es UN eslabón más de la cadena "un bono automático por carga" (ruleta → 1ª carga →
   **historia** → lote) con el contrato del lote (`claimStoryBonus`/`revertStoryBonus`/`settleStoryBonus`, source
   `story_bonus`), cableado en la carga manual y en `hgcashAutoCarga`: un flujo de carga nuevo repite ese patrón. En el
-  panel `deleteStory`/`loadStories` son de las historias de INFLUENCERS: las de la app se llaman `*AppStory`.
+  panel `deleteStory`/`loadStories` son de las historias de INFLUENCERS: las de la app se llaman `*AppStory`. **Centro de
+  avisos / piloto (#363):** todo aviso automático nuevo sale como lote por `_createNotifBatchFromBody` (así cuenta para el
+  tope `dailyCap`/`monthlyCap`) y toda push nueva lleva `data.kind` ('promo' masivo · 'personal' lo del cliente) para
+  respetar `User.notifPrefs`. El piloto pre-programa `ScheduledCampaign.autoKey 'ap-*'`: no borrar ese índice único.
 
 - **Lotes y Cronograma (#356):** el POST `/api/admin/notif-batches` es un wrapper de
   `_createNotifBatchFromBody(body, user)`; cualquier validación/efecto nuevo del lote va en esa
