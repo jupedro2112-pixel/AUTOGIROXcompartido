@@ -146,7 +146,12 @@ VIP.auth = (function () {
                 const r = await fetch(`${VIP.config.API_URL}/api/auth/send-register-otp`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone: fullPhone, username })
+                    body: JSON.stringify({
+                        phone: fullPhone, username,
+                        // #360: con el registro sólo con invitación el server chequea el código/campaña ANTES de gastar el SMS
+                        referralCode: (document.getElementById('registerReferralCode') && document.getElementById('registerReferralCode').value.trim().toUpperCase()) || undefined,
+                        campaignCode: (VIP.campaign && VIP.campaign.getActive && VIP.campaign.getActive()) ? VIP.campaign.getActive().code : undefined
+                    })
                 });
                 const d = await r.json();
                 if (r.ok && d.success) {

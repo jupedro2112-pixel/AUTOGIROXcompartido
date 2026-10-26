@@ -1116,7 +1116,7 @@ VIP.ui.enterCasinoGuest = function() {
   if (drawer) {
     drawer.querySelectorAll('.cwBar, .cwFoot').forEach(function(el) { if (el.id !== 'casinoCommunityRow') el.style.display = 'none'; });
     const bot = document.getElementById('casinoBotArea'); if (bot) bot.style.display = 'none';
-    const title = document.getElementById('casinoWidgetTitle'); if (title) title.textContent = (VIP.flags && VIP.flags.signup === true) ? 'Ingresá o creá tu cuenta' : 'Ingresá a tu cuenta';
+    const title = document.getElementById('casinoWidgetTitle'); if (title) title.textContent = (VIP.signupOpen ? VIP.signupOpen() : (VIP.flags && VIP.flags.signup === true)) ? 'Ingresá o creá tu cuenta' : 'Ingresá a tu cuenta'; // #360 invite-only cuenta como cerrado
     const body = document.getElementById('casinoChatDrawerBody');
     if (body) {
       let wrap = document.getElementById('guestAuthWrap');
@@ -1139,7 +1139,7 @@ VIP.ui.enterCasinoGuest = function() {
   }
   document.body.classList.add('guest-premium'); // skin de los modales (registro, recuperar, etc.)
   const bubble = document.getElementById('casinoSupportBubble');
-  if (bubble) { const lbl = bubble.querySelectorAll(':scope > span')[1]; if (lbl) { VIP.ui._guestBubbleLbl = lbl.textContent; lbl.textContent = (VIP.flags && VIP.flags.signup === true) ? '🔑 INGRESAR / REGISTRARTE' : '🔑 INGRESAR'; } }
+  if (bubble) { const lbl = bubble.querySelectorAll(':scope > span')[1]; if (lbl) { VIP.ui._guestBubbleLbl = lbl.textContent; lbl.textContent = (VIP.signupOpen ? VIP.signupOpen() : (VIP.flags && VIP.flags.signup === true)) ? '🔑 INGRESAR / REGISTRARTE' : '🔑 INGRESAR'; } }
   setTimeout(function() { try { VIP.ui.openCasinoChat(); } catch (e) {} }, 300);
   return true;
 };

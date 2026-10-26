@@ -58,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window._vipRefLocked = refCode;
         const refInput = document.getElementById('registerReferralCode');
         if (refInput) { refInput.value = refCode; refInput.readOnly = true; }
+        try { if (VIP.applyRegistrationMode) VIP.applyRegistrationMode(); } catch (_) {} // #360: con invitación, el registro se ve
         const registerBtn = document.getElementById('registerBtn');
         if (registerBtn) {
             registerBtn.style.background = 'linear-gradient(135deg, #d4af37 0%, #b8860b 100%)';

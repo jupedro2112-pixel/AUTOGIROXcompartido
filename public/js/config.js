@@ -51,18 +51,45 @@ VIP.flags = Object.assign({ sms: false, signup: false }, window.__vipAccessFlags
 
 VIP.applyAccessFlags = function (flags) {
     VIP.flags = { sms: !!(flags && flags.sms === true), signup: !!(flags && flags.signup === true),
-        usernamePrefix: (flags && typeof flags.usernamePrefix === 'string') ? flags.usernamePrefix : 'g1' }; // #328
+        usernamePrefix: (flags && typeof flags.usernamePrefix === 'string') ? flags.usernamePrefix : 'g1', // #328
+        registrationMode: (flags && flags.registrationMode === 'invite') ? 'invite' : 'open', // #360
+        registerInviteText: (flags && typeof flags.registerInviteText === 'string') ? flags.registerInviteText : '',
+        stories: !!(flags && flags.stories === true) }; // #360 (historias, tanda 3)
     const h = document.documentElement;
     h.classList.toggle('sms-off', !VIP.flags.sms);
     h.classList.toggle('signup-off', !VIP.flags.signup);
+    VIP.applyRegistrationMode(); // #360
     try { localStorage.setItem('vip_access_flags', JSON.stringify(VIP.flags)); } catch (e) {}
     try { if (VIP.auth && VIP.auth.refreshVerifyPhoneBanner) VIP.auth.refreshVerifyPhoneBanner(); } catch (e) {}
 };
 
+// #360 (réplica #748 de PICA ROJA): registro SÓLO CON INVITACIÓN. Sin link de referido (?ref=) ni atribución de
+// publicidad, la pantalla de ingreso esconde "Registrarse" (clase html.reg-invite, misma lista que signup-off) y
+// muestra el aviso del panel (/sys_register_invite) en #lgInviteNote. Con invitación el registro se ve igual que
+// siempre (el server valida el código/campaña al mandar el SMS y al crear la cuenta). VIP.flags.inviteOnly queda
+// en true cuando efectivamente se esconde, para que los textos "Ingresá o creá tu cuenta" no prometan registro.
+VIP.applyRegistrationMode = function () {
+    try {
+        const f = VIP.flags || {};
+        let viaRef = false, viaAd = false;
+        try { viaRef = !!new URLSearchParams(location.search).get('ref'); } catch (_) {}
+        try { if (window._vipRefLocked) viaRef = true; } catch (_) {}
+        try { const ri = document.getElementById('registerReferralCode'); if (ri && ri.value.trim()) viaRef = true; } catch (_) {}
+        try { viaAd = !!(VIP.campaign && VIP.campaign.getActive && VIP.campaign.getActive()); } catch (_) {}
+        const invite = f.registrationMode === 'invite' && !viaRef && !viaAd;
+        VIP.flags.inviteOnly = invite;
+        document.documentElement.classList.toggle('reg-invite', invite);
+        const note = document.getElementById('lgInviteNote');
+        if (note) { note.textContent = invite && f.signup ? (f.registerInviteText || '🔒 El registro es sólo con invitación.') : ''; note.style.display = (invite && f.signup) ? '' : 'none'; }
+    } catch (_) {}
+};
+VIP.signupOpen = function () { return !!(VIP.flags && VIP.flags.signup === true && !VIP.flags.inviteOnly); };
+
 VIP.loadAccessFlags = function (attempt) {
     fetch(`${VIP.config.API_URL}/api/config/access`, { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('http ' + r.status)); })
-        .then(function (j) { VIP.applyAccessFlags({ sms: j.smsEnabled === true, signup: j.registrationEnabled === true, usernamePrefix: j.usernamePrefix }); })
+        .then(function (j) { VIP.applyAccessFlags({ sms: j.smsEnabled === true, signup: j.registrationEnabled === true, usernamePrefix: j.usernamePrefix,
+            registrationMode: j.registrationMode, registerInviteText: j.registerInviteText, stories: !!(j.features && j.features.stories === true) }); }) // #360
         .catch(function () {
             // Red lenta (Tor/3G): un par de reintentos; mientras tanto queda lo cacheado.
             if ((attempt || 0) < 2) setTimeout(function () { VIP.loadAccessFlags((attempt || 0) + 1); }, 4000 * ((attempt || 0) + 1));

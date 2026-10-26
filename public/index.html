@@ -70,6 +70,11 @@
         html.signup-off #gpTabRegister,
         html.signup-off #adServiceRegisterBtn,
         html.signup-off [data-needs-signup] { display: none !important; }
+        /* #360: registro sólo con invitación (sin ?ref= ni publicidad) → mismo ocultamiento que registro cerrado. */
+        html.reg-invite #registerBtn,
+        html.reg-invite #gpTabRegister,
+        html.reg-invite #adServiceRegisterBtn,
+        html.reg-invite [data-needs-signup] { display: none !important; }
         html.sms-off #findUserBtn,
         html.sms-off #gpForgot,
         html.sms-off .gp-note,
@@ -557,6 +562,8 @@
                 <p style="color: #b0b0b0; font-size: 11px; margin: 0; line-height: 1.4;">Es opcional, pero te da seguridad total: vas a poder iniciar sesión con tu número por SMS y recuperar tu cuenta si olvidás la clave.</p>
             </div>
 
+            <!-- #360: registro sólo con invitación → se esconde "Registrarse" y se muestra el aviso del panel (/sys_register_invite) -->
+            <p id="lgInviteNote" style="display:none;background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.35);border-radius:10px;padding:9px 11px;margin:8px 0;color:#e8d9a0;font-size:12px;line-height:1.45;text-align:left;"></p>
             <div data-needs-signup style="margin: 8px 0; text-align: center;">
                 <span style="color: #888; font-size: 13px;">¿No tienes cuenta?</span>
                 <button id="registerBtn" class="btn btn-secondary" style="margin-top: 6px; width: 100%;">📝 Registrarse</button>
@@ -2245,23 +2252,23 @@
 
     <!-- Socket.IO desde el servidor local -->
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/js/config.js?v=328"></script>
+    <script src="/js/config.js?v=360"></script>
     <script src="/js/campaign.js"></script>
     <script src="/js/meta-pixel.js"></script>
-    <script src="/js/auth.js?v=352"></script>
+    <script src="/js/auth.js?v=360"></script>
     <script src="/js/socket.js"></script>
     <script src="/js/chat.js"></script>
     <script src="/js/refunds.js"></script>
     <script src="/js/fire.js"></script>
     <script src="/js/reviews.js"></script>
     <script src="/js/notifications.js"></script>
-    <script src="/js/ui.js?v=352"></script>
+    <script src="/js/ui.js?v=360"></script>
     <script src="/js/withdraw.js?v=322"></script>
     <script src="/js/installbonus.js"></script>
     <script src="/js/notifsurvey.js"></script>
     <script src="/js/publisherwelcome.js"></script>
     <script src="/js/apptest.js"></script>
-    <script src="/js/app.js?v=317"></script>
+    <script src="/js/app.js?v=360"></script>
     
     <!-- ============================================
          FIREBASE CLOUD MESSAGING & PWA

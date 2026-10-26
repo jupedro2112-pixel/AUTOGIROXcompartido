@@ -5,7 +5,10 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-20** — PUBLICIDAD solo para DUEÑOS (`User.isOwner`,
+> Última actualización: **2026-10-26** — réplica de PICA ROJA tanda 1: interruptores de
+> funciones (`featureFlags`, `Config['features']`, todo OFF), registro `open|invite`, sistema de
+> notificaciones anterior gateado por `legacyNotifs` (§7, §10; WORKLOG #360).
+> Antes (2026-10-20): PUBLICIDAD solo para DUEÑOS (`User.isOwner`,
 > `ownerMiddleware`, `stripPublicity`, card 👑 en COMANDOS; §3, §9; WORKLOG #359).
 > Antes (2026-10-17): filtro "solo Argentina" de la landing movido a
 > Vercel (`landing/vercel.json`, #358, sección "Landing (Vercel)" al final); el middleware
@@ -1125,11 +1128,11 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 
 | Motor | Frecuencia | Estado | Idempotencia |
 |---|---|---|---|
-| `_runNotifRulesEvaluator` (reglas push) | 5 min | activo (reglas refund/tier inertes: PlayerStats no portado) | lastFiredAt + ventana |
-| `_runEncuestaTick` | 5 min | pushes sí, **bonos apagados** (`bDays=[]`) | EncuestaFire.slotKey único |
+| `_runNotifRulesEvaluator` (reglas push) | 5 min | **APAGADO salvo `features.legacyNotifs` ON** (#360; reglas refund/tier inertes: PlayerStats no portado) | lastFiredAt + ventana |
+| `_runEncuestaTick` | 5 min | **APAGADO salvo `features.legacyNotifs` ON** (#360); con el flag: pushes sí, **bonos apagados** (`bDays=[]`) | EncuestaFire.slotKey único |
 | `_runInactividadTick` | 6 h | **APAGADO** (`INACTIVIDAD_DISABLED=true`) | InactividadFire.fireKey único |
 | `_runBonusStrategy` | 10 min | **APAGADO** (`BONUS_STRATEGY_DISABLED=true`) | step en StrategyEnrollment |
-| `_runDueSchedules` (ScheduledNotif) | 60 s | activo | lastRunAt |
+| `_runDueSchedules` (ScheduledNotif) | 60 s | **APAGADO salvo `features.legacyNotifs` ON** (#360) | lastRunAt |
 | `_pollPayingPayouts` | 45 s | activo (confirma pagos si el webhook no llegó) | handlePayoutStatusWebhook idempotente |
 | `_runStaleComprobanteSweep` | 60 s | activo (comprobante sin carga a los `HGCASH_STALE_MIN` min → chat a Abiertos) | claim atómico `Comprobante.staleAlertedAt` + sólo post-boot |
 | `_runVipTick` (niveles VIP) | 30 min | activo (se apaga desde el panel: Config → "Niveles VIP", flag `vip_levels_disabled` en Config, SOLO admin general — sin cache a propósito para que aplique al instante en todas las instancias) | buckets con `$set` idempotente + bono con reference `vip-lvl-*` (la plataforma dedupe) |
@@ -1342,3 +1345,21 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   en EB (nadie la usa). ⚠️ Los crawlers de Meta (revisión de anuncios / preview) vienen de EE.UU.
   y ven la página vacía: si Meta rechaza anuncios por eso, agregar excepción por user-agent en el
   mismo `vercel.json`.
+
+## 10. Interruptores de funciones y modo de registro (#360, réplica de PICAROJA30 vía CARGASGIROX #208)
+
+- **`src/services/featureFlags.js`** — `Config['features']` = `{ datosIa, fraudRadar, notifCenter, autopilot,
+  stories, legacyNotifs }`, **todo `false` por default**, cache 30 s por proceso. `isOn(name)`, `getAll()`,
+  `set(patch, by)`. Rutas `GET/POST /api/admin/features` (POST solo admin general; van después de
+  `GET /api/config/access`). Hooks `onFeaturesChanged(fn)` en server.js (p. ej. limpiar lo que una función programó
+  al apagarla). Panel: COMANDOS → "🧩 Funciones"; los `.nav-item[data-feature]` se esconden si el flag está OFF
+  (`applyFeatureNav`). Regla: **toda función replicada de PICA ROJA consulta su flag** en sus rutas (responder
+  404 `FEATURE_OFF` / `{ok:false, off:true}` apagada) y al principio de cada cron.
+- `legacyNotifs` = el sistema automático anterior de esta página (reglas `NotificationRule`, encuesta, estrategia
+  programada `ScheduledNotif`). Los envíos manuales (compositor, lotes, cronograma `_schedTick`) no dependen de él.
+- **Registro:** `Config['registrationMode']` `'open'|'invite'` (`getRegistrationMode`, `_inviteOnlyBlocks`), **capa
+  encima de `accessSwitches.registrationEnabled` (#322)**: apagado ⇒ `REGISTRATION_DISABLED` para todos; encendido +
+  `invite` ⇒ `/api/auth/register` y `/api/auth/send-register-otp` → `403 INVITE_ONLY` salvo código de referido real
+  (`User.referralCode`) o campaña activa (`Campaign.code` + `isActive`). Aviso `/sys_register_invite`.
+  `GET /api/config/access` (público) publica `registrationMode`, `registerInviteText` y `features.stories`; la PWA
+  pone `html.reg-invite` (`VIP.applyRegistrationMode`, `VIP.signupOpen()`), salvo `?ref=`/código/atribución de pauta.
