@@ -8,6 +8,46 @@
 
 ## Sesión 2026-10-27
 
+### 370. Finpro — CARGAS sin webhook: verificación por comprobante (`verify/incoming`) + re-verificación cada 2 min
+- Finpro (hoy) NO avisa las transferencias entrantes; las docs de Webhooks y "Listado para
+  conciliación" las manda el owner después. Mientras tanto la carga nace del COMPROBANTE:
+  `hgcashMatchFromComprobante`, si ningún movimiento pendiente (hgcash) matchea y Finpro recibe
+  cargas (`Config['finpro'].enabled` + credenciales + CVU/cuenta), llama a
+  **`_finproVerifyComprobante`**: `POST /transfers/verify/incoming` con el dato más fuerte
+  (`coelsa_id` del comprobante → N° de operación si tiene pinta de coelsa (22 alfanuméricos con
+  letras) → `amount + occurred_at` (= cuándo mandó el comprobante) `+ window_minutes 180 + to_cvu`
+  nuestro). **DECISIÓN de confianza:** si la respuesta no trae `confidence`, se toma `exact` solo
+  cuando la coincidencia fue por código (coelsa/autorización); si no, `medium`.
+- **Resultados:** `confirmed` con confianza exact/high y mismo monto → **`_finproIngestIncoming`**
+  (crea el `BankMovement` `provider:'finpro'`, `movementId 'fp:<notification.id>'` — o
+  `'fp:coelsa:<coelsa>'`/`'fp:auth:<autorización>'` si no trae id —, `status 'done'`, `coelsaCode`
+  = el del comprobante si la respuesta no lo trae, `externalId` = authorization_code,
+  origen/destino si vienen, idempotente por movementId) y va DIRECTO a **`hgcashAutoCarga`** (el
+  match lo hizo Finpro; candados de siempre: claim atómico de movimiento y comprobante,
+  `HgcashCharge` por coelsa, guard de duplicados, multicuenta bancaria, modo sombra/auto de Finpro,
+  reference `vip-hg-<coelsa>`). `not_found_yet` → `Comprobante.finproVerifyStatus 'pending'` y el
+  cron **`_finproReverifyTick`** (cada 2 min, por instancia, claim atómico corriendo
+  `finproVerify.nextAt` antes de consultar) lo vuelve a preguntar hasta 90 min → `gave_up` + nota;
+  si mientras tanto un agente cargó a mano (depósito del mismo monto posterior al comprobante) o el
+  comprobante se resolvió por otro camino → `resolved`, no se carga (evita la doble carga que la
+  red de 8 min no cubriría). El chat va a Abiertos igual que con hgcash ("sin carga automática")
+  con la pista "Finpro sigue verificando cada 2 min". `ambiguous`, confianza `medium` o monto
+  distinto → NO se carga: `bankMatchStatus 'needs_review'` + chat a Abiertos + nota
+  "🟣 Finpro: coincidencia AMBIGUA". HTTP 400/401/403 → `error` (credenciales / permiso
+  `movements`), nota al agente, sin reintento; red/5xx → se reintenta.
+- Cada intento queda en `Comprobante.finproVerify` (`startedAt, attempts, lastAt, nextAt, last,
+  log[≤10], movementId`) → tabla "Comprobantes en re-verificación" del 🔎 Diagnóstico del panel.
+- ⚠️ `verify/incoming` solo valida ACREDITADAS: **no hay detección de reversiones** para Finpro
+  (no existe el equivalente del `payment.reversed` de GH Wallet). **Punto de extensión** para
+  cuando lleguen Webhooks / Listado: armar `{ id, amount, coelsaId, authorizationCode, toCvu,
+  fromCvu, fromName, fromCuit, occurredAt, raw }` → `_finproIngestIncoming(n, 'webhook'|'list')`
+  → `hgcashMatchFromMovement(movement)`; nada más.
+- Modelo `Comprobante`: `finproVerifyStatus` (index) + `finproVerify` (Mixed). Docs:
+  ARCHITECTURE (§2, §4.8, §5 "Finpro", §6, §7, §9) y CLAUDE.md (gotcha Finpro en lugar del de
+  GH Wallet). **Back necesita deploy.** PROBAR: comprobante con COELSA de una transferencia real a
+  nuestro CVU de Finpro → carga sola (modo auto) o nota de match (sombra); comprobante antes de que
+  acredite → "sin carga automática" + se carga sola cuando el cron la confirma.
+
 ### 369. Finpro — RETIROS: un proceso por pago, secuencial por CVU, estado por consulta + callback
 - **`_payPayoutViaFinpro`** (rama de `POST /api/admin/payouts/:id/pay` con
   `Config['bankProvider']='finpro'`): si el pedido trae alias (no 22 dígitos) se resuelve por
