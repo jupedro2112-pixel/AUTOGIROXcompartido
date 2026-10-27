@@ -52,8 +52,9 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   proxy a /src/models). **OJO: hay DOS connectDB** (este y `src/models/index.js`); el
   segundo NO se usa desde server.js. No tocar schemas en config/database.js (sólo
   define ExternalUser y UserActivity; el resto es proxy a /src/models).
-- `src/services/hgcashService.js` y `src/services/ghwalletService.js` — los DOS bancos con
-  API (hgcash y GH Wallet, #332). Comparten el pipeline de matcheo/auto-carga de server.js;
+- `src/services/hgcashService.js` y `src/services/finproService.js` — los DOS bancos con
+  API (hgcash y **Finpro**, #368; GH Wallet #332–#341 se QUITÓ: solo queda la lectura de sus
+  datos viejos). Comparten el pipeline de matcheo/auto-carga de server.js;
   `Config['bankProvider']` elige por cuál salen los retiros.
 - `src/services/giroxService.js` — **cliente ÚNICO de la Partner API** (altas, saldo,
   cargas, retiros, bonos, cambio de clave y login único/SSO).
@@ -75,7 +76,7 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   `zamuxavier`, dominio auto1girox.com).
 - `src/models/` — schemas Mongoose canónicos (fuente de verdad).
 - `src/services/` — lógica (referidos, notificaciones, otp, metaCapi, fbAds, hgcash,
-  ghwallet, comprobantes IA, analítica publicistas…). `outboundWebhookService.js` (#334) =
+  finpro, comprobantes IA, analítica publicistas…). `outboundWebhookService.js` (#334) =
   webhooks salientes a publicistas configurados desde el panel (`Config['outboundWebhooks']`);
   `fbAdsWebhookService.js` es el viejo destino único por SSM (no agregarle features).
 - `landing/` — landing de pauta. ⚠️ **La sirve VERCEL, no EB** (proyecto conectado a este
@@ -104,11 +105,22 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   usar `hgcashPay.getToken()` y `_hgcashWebhookSecrets()`. **Reenvío a otras páginas (#326):**
   también desde el panel (`Config['hgcashFanout']`, hasta 5 URLs; sin config vale
   `HGCASH_FANOUT_URL`). Un aviso ya reenviado (`X-Forwarded-By`) no se vuelve a reenviar.
-- **GH Wallet (#332):** segundo banco, paralelo a hgcash, mismo pipeline. Acredita SOLO con
-  el evento `payment.verified` (plata firme); `payment.paid` llega antes como `held` y NO se
-  carga. Retiros por el banco elegido en el panel (`Config['bankProvider']`); GH no resuelve
-  alias (CBU/CVU de 22) y su clave real necesita el permiso `payouts:create`. Credenciales
-  como hgcash: panel > SSM (`GHWALLET_API_TOKEN`, `GHWALLET_WEBHOOK_SECRET`).
+- **Finpro (#368–#370, reemplaza a GH Wallet):** segundo banco, paralelo a hgcash, mismo
+  pipeline. ⚠️ **Sin webhook de entradas (por ahora):** Finpro no avisa cuando entra plata; la
+  carga nace del COMPROBANTE del cliente → `transfers/verify/incoming` (coelsa → monto+fecha) →
+  `_finproIngestIncoming` → `hgcashAutoCarga`. `not_found_yet` se re-consulta cada 2 min hasta
+  90 min (`_finproReverifyTick`); `ambiguous`/confianza media NO carga. verify **no detecta
+  reversiones** → no hay débito automático. Cuando lleguen las docs de Webhooks / Listado,
+  enchufar en `_finproIngestIncoming(notification, source)`. **Retiros:** un pago = UN
+  `process_id` (`PendingPayout.fpProcessId`): se reusa solo si el lote fue aceptado
+  (`fpAccepted`); tras un timeout NO se reenvía (el poll pregunta); transferencias del mismo
+  CVU de a UNA (`finpro.withCvuLock`, error 2454); `transaction_id` ≤ 11 chars. El
+  comprobante del pago es el `coelsa_id` (`fpCoelsaId`). **Token 1 h** solo para
+  `accounts/information`; el resto va con `X-API-Key`/`X-API-Secret`. **La URL default es la de
+  DESARROLLO** (`mw-dev.finpro.com.ar`): la de producción se carga en el panel (aviso rojo).
+  Credenciales + bankId/cuenta/CVU/URL: panel (`Config['finproCredentials']`, cifrado) > SSM
+  (`FINPRO_*`). Nada nuevo se crea con `provider:'ghwallet'`/`paidVia:'ghwallet'`: solo se
+  muestra lo histórico.
 - **JWT_SECRET y otros secrets** se cargan desde AWS SSM en el bootstrap async, NO al
   `require()`. Por eso hay lazy getters en `src/middlewares/auth.js` y rutas.
 - **IDEMPOTENCIA POR `reference` (lo más importante de la plataforma nueva).** Cargas,

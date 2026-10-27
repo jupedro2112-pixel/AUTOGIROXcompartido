@@ -8,6 +8,59 @@
 
 ## Sesión 2026-10-27
 
+### 368. FINPRO reemplaza a GH WALLET como segundo banco con API (servicio, credenciales, bancos del panel) — admin-sw v101
+- **Owner:** "quiero implementar un banco con API nuevo y reemplazar GH WALLET que no se va a usar
+  más, dejar hgcash y este nuevo banco que se llama Finpro". Doc: app.finpro.com.ar/docs
+  (transcripción del owner; Webhooks y "Listado para conciliación" todavía NO los mandó).
+- **Se QUITA GH Wallet (#332–#341):** `src/services/ghwalletService.js`, `POST /api/ghwallet/webhook`
+  (y su reenvío a otras páginas: `_fanoutHgcashWebhook` vuelve a ser solo hgcash),
+  `/api/admin/ghwallet/*`, `getGhwalletConfig`/`GHWALLET_DEFAULTS`, credenciales
+  `Config['ghwalletCredentials']`, `_ghwalletAccountCache`, `_autoDebitReversedGhwallet`,
+  `_pollHeldGhwalletPayments`, `_ghwalletPayoutStatusToHg`, `_payPayoutViaGhwallet`, el bloque
+  "🔵 GH Wallet" del panel y las variables `GHWALLET_*`. **Lo viejo se sigue LEYENDO sin romper:**
+  `BankMovement.provider:'ghwallet'` y `PendingPayout.paidVia:'ghwallet'`/`gwPayoutId` figuran
+  con la etiqueta "GH Wallet" (badge GH, filtro "histórico"), `_bankCfgForMovement` los trata
+  como banco apagado (nada pendiente se carga solo), `/sync` de un pago GH responde 400
+  explicando, y `Config['bankProvider']='ghwallet'` guardado se toma como `hgcash`
+  (`BANK_PROVIDERS = ['hgcash','finpro']`).
+- **`src/services/finproService.js` (nuevo):** headers `X-API-Key`/`X-API-Secret` en todo;
+  token de cliente (`POST /api/banks/{bankId}/auth/token/client`, `x-access-token`, 1 h) cacheado
+  en memoria, renovado con < 120 s o ante 401 (`_withToken`); `getBalance` (`accounts/balance`,
+  campos no documentados → parseo defensivo + raw), `getAccountInformation` (`accounts/information`,
+  alias → CVU + titular + CUIT por Coelsa), `createCvuTransfer`, `getProcessStatus`,
+  `getProcessResult`, `verifyIncoming` (normalizan respuestas con `_pickString/_pickNumber`),
+  `withCvuLock` (cola secuencial por from_cvu), tabla de códigos del banco en español
+  (`describeCode`, `isErrorCode` = tabla + forma 2xxx/04xx/05xx), `transactionIdFor` ('P' +
+  10 hex del sha1 del payout = 11 chars), `isoWithOffsetAR`, ring buffer de llamadas (`getDiag`).
+  Nunca loguea ni devuelve key/secret/token (solo last4).
+- **Config:** `Config['finpro']` `{enabled, mode}` (`getFinproConfig`, `acceptStatuses` fijo
+  `['done']`) + `Config['finproCredentials']` = key/secret cifrados (`_credEncrypt`, misma clave
+  derivada de JWT_SECRET que hgcash) + `bankId`, `account`, `fromCvu`, `baseUrl` en claro;
+  `_loadFinproCredentials` cada 60 s → `finpro.setCredentialsOverride/setSettingsOverride`;
+  panel > SSM (`FINPRO_API_KEY/SECRET/API_URL/BANK_ID/ACCOUNT/FROM_CVU`). **DECISIÓN: la URL
+  base por defecto es la de la doc, `https://mw-dev.finpro.com.ar` = DESARROLLO** (la de
+  producción no está documentada): el panel muestra un aviso ROJO mientras la URL contenga
+  "dev" y pide cargar la de producción. `_finproAccountCache` = titular/CUIT de NUESTRO CVU
+  (`accounts/information`, refresco 1 h) → `_destConsistentOk` compara el destino del
+  comprobante con nuestro CVU/titular (si no se leyó, acepta: la verificación ya prueba que
+  entró a nuestra cuenta). `_bankLabel('finpro')` = "Finpro".
+- **Panel ("🏦 Bancos automáticos" + bloque "🟣 Finpro"):** radios de cargas hgcash / Finpro / los
+  dos / ninguno y retiros hgcash / Finpro (`/api/admin/banks` rechaza activar Finpro sin
+  credenciales + CVU/cuenta, y elegirlo para retiros sin CVU de origen; `/api/admin/bank-provider`
+  ídem). Bloque Finpro: aviso de URL de desarrollo, línea de estado, modo sombra/auto
+  (`GET/POST /api/admin/finpro/config`), credenciales (API Key, API Secret, bankId, n° de cuenta,
+  nuestro CVU, URL base; "🔐 Probar y guardar" = `GET/POST /api/admin/finpro/credentials` pide el
+  token y, con cuenta, el saldo ANTES de guardar; "↩️ Volver a usar AWS (SSM)" = DELETE), caja de
+  cuenta (saldo + titular del CVU, `GET /api/admin/finpro/account`), URL del callback de pagos,
+  "🔎 Diagnóstico" (`GET /api/admin/finpro/diag`: últimas llamadas, token, callbacks, re-verificaciones,
+  últimos movimientos y pagos Finpro) y "Verificar una transferencia a mano" (`POST
+  /api/admin/finpro/verify`: coelsa | autorización | monto+fecha+ventana; solo consulta). Lista
+  de movimientos: badge **Finpro** (violeta) y filtro por banco (hgcash / Finpro / GH histórico).
+  Banner de retiro del chat muestra el titular según el banco (`lookupName`) y el COELSA del pago.
+- Modelos: `BankMovement.provider` acepta 'finpro' (`movementId 'fp:<id>'`), comentario de
+  'ghwallet' como histórico. `node --check` OK en server.js, servicio, modelos, admin.js y
+  admin-sw. **Back necesita deploy.** Lo de retiros y cargas está en #369 y #370.
+
 ### 367. FIX widget del casino: en celular abre SIEMPRE al máximo (el achique ya no se guarda) — SW v211 / ui.js?v=367
 - **Owner (captura iPhone 400×791):** "no abre al máximo para arriba, ¿es porque no es la primera
   vez que abre el usuario y queda ajustado a como lo dejó antes?". Sí: el ancho ya se adaptaba

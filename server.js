@@ -76,7 +76,7 @@ const BankMovement = require('./src/models/BankMovement');
 const HgcashCharge = require('./src/models/HgcashCharge');
 const PendingPayout = require('./src/models/PendingPayout');
 const hgcashPay = require('./src/services/hgcashService');
-const ghwallet = require('./src/services/ghwalletService'); // #332: GH Wallet, banco paralelo a hgcash
+const finpro = require('./src/services/finproService'); // #368: Finpro, banco paralelo a hgcash (reemplaza a GH Wallet #332)
 const pdfImage = require('./src/services/pdfImageService');
 const { generateReferralCode } = require('./src/utils/referralCode');
 // #317 réplica referidos (#168-#175 del gemelo AUTOREEMBOLSOS), adaptada a 1girox.
@@ -2498,47 +2498,57 @@ async function getHgcashConfig() {
 }
 
 // ============================================================
-// #332 GH WALLET — banco con API PARALELO a hgcash (owner 2026-10-07: "que tenga la
-// opción de elegir hgcash o GH Wallet y que se puedan cargar en paralelo, separado").
+// #368 FINPRO — banco con API PARALELO a hgcash (reemplaza a GH Wallet, #332–#341,
+// que ya no se usa; owner 2026-10-27: "dejar hgcash y este nuevo banco, Finpro").
 // ------------------------------------------------------------
-// • Config['ghwallet'] = { enabled, mode } — interruptor y modo (sombra/auto) PROPIOS.
+// • Config['finpro'] = { enabled, mode } — interruptor y modo (sombra/auto) PROPIOS.
 //   El resto de los parámetros del matcheo (ventana, mínimo, guard de duplicados,
 //   moneda) se comparten con la card de hgcash (son del pipeline, no del banco).
-// • Config['bankProvider'] = 'hgcash' | 'ghwallet' — qué banco PAGA los retiros
-//   (selector del panel). Los webhooks ENTRANTES de los dos bancos se aceptan
-//   siempre: cada movimiento lleva `provider` y se gatea con la config de SU banco.
-// • Los movimientos de GH Wallet entran al MISMO pipeline (BankMovement →
-//   hgcashMatchFromMovement / hgcashMatchFromComprobante → hgcashAutoCarga): mismo
-//   matcheo por coelsa/nombre, mismos candados (HgcashCharge por coelsa, guard de
-//   duplicados, multicuenta bancaria) y misma reference `vip-hg-<coelsa>`.
+//   Credenciales y datos de la cuenta (api key/secret, bankId, cuenta, CVU, URL) van en
+//   Config['finproCredentials'] cifrado — ver _loadFinproCredentials.
+// • Config['bankProvider'] = 'hgcash' | 'finpro' — qué banco PAGA los retiros
+//   (selector del panel). Un valor viejo 'ghwallet' se trata como 'hgcash'.
+// • Finpro NO avisa (todavía) las transferencias entrantes: se VERIFICAN con
+//   `transfers/verify/incoming` a partir del comprobante del cliente
+//   (`_finproVerifyComprobante`) y, si está acreditada, se crea el BankMovement
+//   (`provider:'finpro'`, `_finproIngestIncoming`) que entra al MISMO pipeline que
+//   hgcash: mismos candados (HgcashCharge por coelsa, guard de duplicados, multicuenta
+//   bancaria) y misma reference `vip-hg-<coelsa>`. Sin webhook no hay detección de
+//   reversiones (verify solo valida acreditadas).
+// • Los BankMovement / PendingPayout viejos de GH Wallet (`provider:'ghwallet'`,
+//   `paidVia:'ghwallet'`) se siguen MOSTRANDO (etiqueta "GH Wallet") pero no se crean
+//   ni se operan más.
 // ============================================================
-// #338 chargeOn: 'verified' = cargar recién con payment.verified (plata firme, 1-5 min);
-// 'paid' = cargar al instante con payment.paid (retenido) y, si GH lo revierte después,
-// descontar las fichas solas (`_autoDebitReversedGhwallet`). Owner 2026-10-08: "el
-// cliente no va a parar de quejarse 5 minutos".
-const GHWALLET_DEFAULTS = { enabled: false, mode: 'shadow', chargeOn: 'verified' };
-async function getGhwalletConfig() {
-  const cfg = await getConfig('ghwallet', null);
-  const merged = Object.assign({}, GHWALLET_DEFAULTS, cfg || {});
+const FINPRO_DEFAULTS = { enabled: false, mode: 'shadow' };
+async function getFinproConfig() {
+  const cfg = await getConfig('finpro', null);
+  const merged = Object.assign({}, FINPRO_DEFAULTS, cfg || {});
   merged.enabled = merged.enabled === true;
   merged.mode = merged.mode === 'auto' ? 'auto' : 'shadow';
-  merged.chargeOn = merged.chargeOn === 'paid' ? 'paid' : 'verified';
-  merged.acceptStatuses = merged.chargeOn === 'paid' ? ['held', 'done'] : ['done'];
+  merged.acceptStatuses = ['done']; // verify/incoming solo devuelve transferencias ACREDITADAS
   return merged;
 }
-const BANK_PROVIDERS = ['hgcash', 'ghwallet'];
+const BANK_PROVIDERS = ['hgcash', 'finpro'];
 async function getBankProvider() {
   const v = String(await getConfig('bankProvider', 'hgcash') || 'hgcash').toLowerCase();
-  return BANK_PROVIDERS.includes(v) ? v : 'hgcash';
+  return BANK_PROVIDERS.includes(v) ? v : 'hgcash'; // 'ghwallet' (viejo) → hgcash
 }
-function _bankLabel(provider) { return provider === 'ghwallet' ? 'GH Wallet' : 'hgcash'; }
+function _bankLabel(provider) {
+  if (provider === 'finpro') return 'Finpro';
+  if (provider === 'ghwallet') return 'GH Wallet'; // solo histórico (ya no se usa)
+  return 'hgcash';
+}
 // Config efectiva para un movimiento según su banco: enabled/mode del banco dueño
 // + los parámetros compartidos del pipeline (de la card de hgcash).
 async function _bankCfgForMovement(movement) {
   const base = await getHgcashConfig();
+  if (movement && movement.provider === 'finpro') {
+    const fp = await getFinproConfig();
+    return Object.assign({}, base, { enabled: fp.enabled, mode: fp.mode, acceptStatuses: fp.acceptStatuses });
+  }
   if (movement && movement.provider === 'ghwallet') {
-    const gw = await getGhwalletConfig();
-    return Object.assign({}, base, { enabled: gw.enabled, mode: gw.mode, acceptStatuses: gw.acceptStatuses });
+    // GH Wallet ya no se usa: lo que haya quedado pendiente no se carga solo.
+    return Object.assign({}, base, { enabled: false, mode: 'shadow' });
   }
   return base;
 }
@@ -2600,17 +2610,18 @@ function _destConsistentOk(comprobante, movement, cfg) {
   if (movement) {
     if (comprobante.destCbu && movement.toCBU && _digits(comprobante.destCbu) === _digits(movement.toCBU)) return true;
     if (comprobante.destHolder && movement.toName && _nameMatch(comprobante.destHolder, movement.toName)) return true;
-    // #339: GH Wallet no manda el destino en el aviso; se compara con la cuenta del token
-    // (GET /account, cacheada). Si todavía no se pudo leer, el aviso ya prueba que la
-    // plata entró a NUESTRA cuenta de GH → se acepta.
-    if (movement.provider === 'ghwallet') {
-      const accs = _ghwalletAccountCache.accounts;
-      if (!accs || !accs.length) return true;
-      for (const a of accs) {
-        if (comprobante.destCbu && (a.cvu || a.cbu) && _digits(comprobante.destCbu) === _digits(a.cvu || a.cbu)) return true;
-        if (comprobante.destHolder && a.titular && _nameMatch(comprobante.destHolder, a.titular)) return true;
-      }
+    // #368: el movimiento de Finpro nace de verify/incoming sobre NUESTRO CVU; se compara
+    // con el CVU/titular configurados (`_finproAccountCache`, accounts/information). Si el
+    // titular todavía no se pudo leer, se acepta: la verificación ya prueba que la plata
+    // entró a nuestra cuenta de Finpro.
+    if (movement.provider === 'finpro') {
+      const ourCvu = finpro.fromCvu();
+      if (comprobante.destCbu && ourCvu && _digits(comprobante.destCbu) === ourCvu) return true;
+      const holder = _finproAccountCache.holder;
+      if (comprobante.destHolder && holder && _nameMatch(comprobante.destHolder, holder)) return true;
+      if (!holder) return true;
     }
+    if (movement.provider === 'ghwallet') return true; // histórico: ya no se carga (enabled:false)
   }
   if (_comprobanteToOurBank(comprobante, cfg)) return true;
   return false;
@@ -2908,23 +2919,30 @@ async function maybeSendPayoutReceipt(payout) {
 // (que es nuestro payout.id) o por el id de la transacción hgcash.
 async function handlePayoutStatusWebhook(p, provider) {
   try {
-    const isGw = provider === 'ghwallet'; // #332: mismo mapeo para los retiros de GH Wallet
-    const bank = _bankLabel(isGw ? 'ghwallet' : 'hgcash');
+    // #368: mismo mapeo para los retiros de Finpro ('finpro'); 'ghwallet' queda solo para
+    // poder leer pagos viejos (ya no se opera).
+    const prov = provider === 'finpro' ? 'finpro' : (provider === 'ghwallet' ? 'ghwallet' : 'hgcash');
+    const isHg = prov === 'hgcash';
+    const bank = _bankLabel(prov);
+    const tag = `[${prov}-pay]`;
     const status = String(p.status || '').toUpperCase();
     const ext = p.externalID ? String(p.externalID) : null;
     const hgId = p.id ? String(p.id) : null;
-    const query = ext ? { id: ext } : (hgId ? (isGw ? { gwPayoutId: hgId } : { hgTransactionId: hgId }) : null);
+    const idField = prov === 'finpro' ? 'fpProcessId' : (prov === 'ghwallet' ? 'gwPayoutId' : 'hgTransactionId');
+    const query = ext ? { id: ext } : (hgId ? { [idField]: hgId } : null);
     if (!query) return;
     const payout = await PendingPayout.findOne(query);
     if (!payout) {
-      logger.warn(`[${isGw ? 'ghwallet' : 'hgcash'}-pay] webhook de pago sin payout local: ext=${ext} id=${hgId} status=${status}`);
+      logger.warn(`${tag} webhook de pago sin payout local: ext=${ext} id=${hgId} status=${status}`);
       return;
     }
     // Guardar el id del banco si todavía no lo teníamos.
-    if (hgId && isGw && !payout.gwPayoutId) {
-      await PendingPayout.updateOne({ id: payout.id }, { $set: { gwPayoutId: hgId } });
-    } else if (hgId && !isGw && !payout.hgTransactionId) {
-      await PendingPayout.updateOne({ id: payout.id }, { $set: { hgTransactionId: hgId } });
+    if (hgId && !payout[idField]) {
+      await PendingPayout.updateOne({ id: payout.id }, { $set: { [idField]: hgId } });
+    }
+    // #368: coelsa del pago en Finpro = el "número de comprobante" que ve el operador.
+    if (p.coelsaId && payout.fpCoelsaId !== String(p.coelsaId)) {
+      await PendingPayout.updateOne({ id: payout.id }, { $set: { fpCoelsaId: String(p.coelsaId) } });
     }
     // El webhook 'transaction_associated' trae el id de la TRANSACCIÓN real (≠ request)
     // → lo guardamos para poder pedir el comprobante PDF.
@@ -2937,8 +2955,8 @@ async function handlePayoutStatusWebhook(p, provider) {
       if (payout.status === 'paid') return; // idempotente
       await PendingPayout.updateOne({ id: payout.id }, { $set: { status: 'paid', hgStatus: status, paidAt: new Date() } });
       await notifyPayoutPaid(payout);
-      if (!isGw) maybeSendPayoutReceipt(payout).catch(() => {}); // comprobante PDF automático (solo hgcash lo tiene)
-      logger.info(`[${isGw ? 'ghwallet' : 'hgcash'}-pay] PAGADO payout=${payout.id} user=${payout.username} $${payout.amount}`);
+      if (isHg) maybeSendPayoutReceipt(payout).catch(() => {}); // comprobante PDF automático (solo hgcash lo tiene)
+      logger.info(`${tag} PAGADO payout=${payout.id} user=${payout.username} $${payout.amount}${p.coelsaId ? ' coelsa=' + p.coelsaId : ''}`);
     } else if (status === 'ERROR' || status === 'CANCELLED') {
       const reason = p.errorCode || p.error || status;
       await PendingPayout.updateOne({ id: payout.id }, { $set: { status: 'failed', hgStatus: status, error: String(reason).slice(0, 300) } });
@@ -2947,7 +2965,7 @@ async function handlePayoutStatusWebhook(p, provider) {
       await _emitAdminOnlyChatNote(payout.userId, payout.username,
         `💸 ⚠️ El PAGO automático FALLÓ en ${bank} (${reason}) — $${Number(payout.amount).toLocaleString('es-AR')} a ${payout.titular || payout.cbu}. ` +
         (yaDescontado ? 'Las fichas YA fueron descontadas: NO devuelvas. Pagá manual ("otro banco") o reintentá.' : 'Revisá y pagá manual.'));
-      logger.warn(`[${isGw ? 'ghwallet' : 'hgcash'}-pay] FALLÓ payout=${payout.id} status=${status} reason=${reason}`);
+      logger.warn(`${tag} FALLÓ payout=${payout.id} status=${status} reason=${reason}`);
     } else {
       // PENDING / AWAITING_REVIEW / PROCESSING → sólo actualizar hgStatus.
       await PendingPayout.updateOne({ id: payout.id }, { $set: { hgStatus: status } });
@@ -3375,8 +3393,8 @@ async function hgcashMatchFromComprobante(comprobante) {
   try {
     if (!comprobante || !comprobante.isComprobante || comprobante.autoCharged) return;
     const cfg = await getHgcashConfig();
-    const gwCfg = await getGhwalletConfig(); // #332
-    if (!cfg.enabled && !gwCfg.enabled) {
+    const fpCfg = await getFinproConfig(); // #368
+    if (!cfg.enabled && !fpCfg.enabled) {
       // Banco automático APAGADO → toda carga es manual: el comprobante necesita
       // un agente sí o sí → ABIERTOS ya mismo (no esperar al barrido).
       await _markComprobanteAlerted(comprobante.id);
@@ -3389,18 +3407,19 @@ async function hgcashMatchFromComprobante(comprobante) {
     // match se valida contra el movimiento real (sirve para cualquier banco/cuenta).
     const since = new Date(Date.now() - (cfg.windowMinutes || 60) * 60 * 1000);
     // #336: `date` = cuándo se hizo la transferencia según el banco. Un movimiento que
-    // llegó recién pero es VIEJO (GH Wallet reenvía el histórico al cargar la URL del
-    // webhook) no es candidato: esa plata ya se cargó a mano en su momento.
+    // llegó recién pero es VIEJO (un banco que reenvía el histórico) no es candidato:
+    // esa plata ya se cargó a mano en su momento. Solo para bancos cuya `date` viene con
+    // zona (Finpro ISO; GH Wallet histórico). El `date` de hgcash viene como hora local
+    // sin zona (queda 3 h corrido) y NO sirve para filtrar.
     const candidates = await BankMovement.find({
       direction: 'Inbound', matchStatus: 'pending', createdAt: { $gte: since },
-      // Solo para GH Wallet: su `paid_at` es ISO con zona. El `date` de hgcash viene como
-      // hora local sin zona (queda 3 h corrido) y NO sirve para filtrar.
-      $or: [{ provider: { $ne: 'ghwallet' } }, { date: null }, { date: { $exists: false } }, { date: { $gte: since } }]
+      $or: [{ provider: { $in: ['hgcash', null] } }, { date: null }, { date: { $exists: false } }, { date: { $gte: since } }]
     }).sort({ createdAt: -1 }).limit(80).lean();
 
-    // #332: cada movimiento se evalúa con la config de SU banco (un banco apagado
-    // no aporta candidatos; GH Wallet solo cuenta con status 'done' = verificado).
-    const _cfgOf = (m) => (m.provider === 'ghwallet' ? Object.assign({}, cfg, { enabled: gwCfg.enabled, mode: gwCfg.mode, acceptStatuses: gwCfg.acceptStatuses }) : cfg);
+    // #332/#368: cada movimiento se evalúa con la config de SU banco (un banco apagado
+    // no aporta candidatos; GH Wallet ya no se usa → nunca cuenta).
+    const _cfgOf = (m) => (m.provider === 'finpro' ? Object.assign({}, cfg, { enabled: fpCfg.enabled, mode: fpCfg.mode, acceptStatuses: fpCfg.acceptStatuses })
+      : (m.provider === 'ghwallet' ? Object.assign({}, cfg, { enabled: false }) : cfg));
     const matches = candidates.filter(m => {
       const c = _cfgOf(m);
       return c.enabled && _statusAccredited(m.status, c) && _comprobanteMatchesMovement(comprobante, m, c);
@@ -3585,7 +3604,7 @@ function _fanoutStat(url, ok, err) {
   _hgcashFanoutStats.set(url, st);
 }
 
-function _fanoutHgcashWebhook(req, provider) {
+function _fanoutHgcashWebhook(req) {
   try {
     // Ya viene reenviado por otra página → no se reparte de nuevo (anti-círculo).
     if (req.get('X-Forwarded-By')) return;
@@ -3595,21 +3614,12 @@ function _fanoutHgcashWebhook(req, provider) {
       'Content-Type': req.get('Content-Type') || 'application/json',
       'X-Forwarded-By': 'vipcargas'
     };
-    const isGw = provider === 'ghwallet'; // #332: mismos destinos, ruta y firma de GH Wallet
-    if (isGw) {
-      const gs = req.get('X-Wallet-Signature') || req.get('X-Webhook-Signature');
-      const gt = req.get('X-Wallet-Timestamp') || req.get('X-Webhook-Timestamp');
-      if (gs) headers['X-Wallet-Signature'] = gs;
-      if (gt) headers['X-Wallet-Timestamp'] = gt;
-    } else {
-      const sig = req.get('X-HG-Webhook-Signature');
-      if (sig) headers['X-HG-Webhook-Signature'] = sig;
-    }
+    const sig = req.get('X-HG-Webhook-Signature');
+    if (sig) headers['X-HG-Webhook-Signature'] = sig;
     _getHgcashFanout().then((cfg) => {
       const own = _fanoutUrlKey(_hgcashOwnWebhookUrl());
-      for (const url0 of cfg.urls) {
-        if (_fanoutUrlKey(url0) === own) continue; // nunca a nosotros mismos
-        const url = isGw ? url0.replace(/\/api\/hgcash\/webhook\/?$/i, '/api/ghwallet/webhook') : url0;
+      for (const url of cfg.urls) {
+        if (_fanoutUrlKey(url) === own) continue; // nunca a nosotros mismos
         _fanoutSendOne(url, rawBody, headers);
       }
     }).catch((e) => logger.warn(`[hgcash-fanout] no se pudieron leer los destinos: ${e.message}`));
@@ -3691,259 +3701,134 @@ function _hgcashWebhookSecrets() {
 }
 
 // ============================================
-// #332 GH WALLET — credenciales desde el panel + webhook
+// #368 FINPRO — credenciales desde el panel + verificación de cargas + callback
 // ============================================
-// Mismo esquema que hgcash (#320): Config['ghwalletCredentials'] cifrado con la clave
-// derivada de JWT_SECRET; panel > SSM (GHWALLET_API_TOKEN / GHWALLET_WEBHOOK_SECRET).
-let _ghwalletPanelSecret = null;
-let _ghwalletCredMeta = null;
-// #339: cuenta(s) de GH Wallet del token actual (titular / CVU / alias), para el destino
-// de los movimientos y la consistencia con el comprobante. Se refresca cada hora y
-// cuando cambian las credenciales.
-const _ghwalletAccountCache = { accounts: [], at: 0, tokenKey: null };
-async function _refreshGhwalletAccount(force) {
+// Mismo esquema que hgcash (#320): Config['finproCredentials'] = { apiKeyEnc, apiSecretEnc,
+// apiKeyLast4, apiSecretLast4, bankId, account, fromCvu, baseUrl, updatedBy, updatedAt },
+// key/secret cifrados con la clave derivada de JWT_SECRET; panel > SSM (FINPRO_API_KEY /
+// FINPRO_API_SECRET / FINPRO_BANK_ID / FINPRO_ACCOUNT / FINPRO_FROM_CVU / FINPRO_API_URL).
+// Cada instancia lo carga en memoria al arrancar y cada 60 s.
+// ⚠️ La base URL por defecto es la de DESARROLLO de la doc (mw-dev.finpro.com.ar): la de
+// producción no está documentada → se carga desde el panel cuando Finpro la informe.
+let _finproCredMeta = null; // { apiKeyLast4, apiSecretLast4, updatedBy, updatedAt, decryptError }
+// Titular/CUIT de NUESTRO CVU en Finpro (accounts/information): destino de los movimientos
+// y consistencia con el comprobante. Se refresca cada hora y al cambiar credenciales.
+const _finproAccountCache = { holder: null, cuit: null, cvu: null, at: 0, tag: null };
+async function _refreshFinproAccount(force) {
   try {
-    if (!ghwallet.isEnabled()) { _ghwalletAccountCache.accounts = []; return; }
-    const tokenKey = String(ghwallet.getToken() || '').slice(-8);
-    if (!force && _ghwalletAccountCache.tokenKey === tokenKey && Date.now() - _ghwalletAccountCache.at < 60 * 60 * 1000) return;
-    const r = await ghwallet.getAccount();
-    if (r.ok) { _ghwalletAccountCache.accounts = r.accounts || []; _ghwalletAccountCache.at = Date.now(); _ghwalletAccountCache.tokenKey = tokenKey; }
+    const cvu = finpro.fromCvu();
+    if (!finpro.isEnabled() || cvu.length !== 22) { _finproAccountCache.holder = null; _finproAccountCache.cuit = null; _finproAccountCache.cvu = null; return; }
+    const tag = finpro.getCredentialSource() + ':' + cvu + ':' + finpro.baseUrl();
+    if (!force && _finproAccountCache.tag === tag && Date.now() - _finproAccountCache.at < 60 * 60 * 1000) return;
+    const r = await finpro.getAccountInformation({ cvu });
+    if (r.ok && r.found) {
+      _finproAccountCache.holder = r.nombre; _finproAccountCache.cuit = r.cuit || null; _finproAccountCache.cvu = cvu;
+      _finproAccountCache.at = Date.now(); _finproAccountCache.tag = tag;
+    }
   } catch (_) {}
 }
-async function _loadGhwalletCredentials() {
+async function _loadFinproCredentials() {
   try {
-    const v = await getConfig('ghwalletCredentials', null);
-    if (!v || (!v.tokenEnc && !v.secretEnc)) {
-      ghwallet.setTokenOverride(null); _ghwalletPanelSecret = null; _ghwalletCredMeta = null; return;
+    const v = await getConfig('finproCredentials', null);
+    if (!v || (!v.apiKeyEnc && !v.apiSecretEnc && !v.bankId && !v.account && !v.fromCvu && !v.baseUrl)) {
+      finpro.setCredentialsOverride(null); finpro.setSettingsOverride({}); _finproCredMeta = null; return;
     }
-    let token = null, secret = null, decryptError = false;
-    try { token = v.tokenEnc ? _credDecrypt(v.tokenEnc) : null; } catch (_) { decryptError = true; }
-    try { secret = v.secretEnc ? _credDecrypt(v.secretEnc) : null; } catch (_) { decryptError = true; }
-    ghwallet.setTokenOverride(token);
-    _ghwalletPanelSecret = secret || null;
-    _ghwalletCredMeta = { tokenLast4: v.tokenLast4 || null, secretLast4: v.secretLast4 || null, updatedBy: v.updatedBy || null, updatedAt: v.updatedAt || null, decryptError };
-    if (decryptError) logger.error('[ghwallet] credenciales del panel NO se pudieron descifrar (¿cambió JWT_SECRET?) — se usa SSM');
-  } catch (e) { logger.warn(`[ghwallet] no se pudieron leer las credenciales del panel: ${e.message}`); }
+    let apiKey = null, apiSecret = null, decryptError = false;
+    try { apiKey = v.apiKeyEnc ? _credDecrypt(v.apiKeyEnc) : null; } catch (_) { decryptError = true; }
+    try { apiSecret = v.apiSecretEnc ? _credDecrypt(v.apiSecretEnc) : null; } catch (_) { decryptError = true; }
+    finpro.setCredentialsOverride(apiKey && apiSecret ? { apiKey, apiSecret } : null);
+    finpro.setSettingsOverride({ baseUrl: v.baseUrl || '', bankId: v.bankId || '', account: v.account || '', fromCvu: v.fromCvu || '' });
+    _finproCredMeta = { apiKeyLast4: v.apiKeyLast4 || null, apiSecretLast4: v.apiSecretLast4 || null, updatedBy: v.updatedBy || null, updatedAt: v.updatedAt || null, decryptError };
+    if (decryptError) logger.error('[finpro] credenciales del panel NO se pudieron descifrar (¿cambió JWT_SECRET?) — se usa SSM');
+  } catch (e) { logger.warn(`[finpro] no se pudieron leer las credenciales del panel: ${e.message}`); }
 }
-setTimeout(() => { _loadGhwalletCredentials(); }, 9 * 1000);
-setInterval(() => { _loadGhwalletCredentials(); }, 60 * 1000);
-setTimeout(() => { _refreshGhwalletAccount(true); }, 15 * 1000);
-setInterval(() => { _refreshGhwalletAccount(false); }, 5 * 60 * 1000);
-function _ghwalletWebhookSecrets() {
-  return [_ghwalletPanelSecret, process.env.GHWALLET_WEBHOOK_SECRET || null].filter(Boolean);
-}
+setTimeout(() => { _loadFinproCredentials(); }, 9 * 1000);
+setInterval(() => { _loadFinproCredentials(); }, 60 * 1000);
+setTimeout(() => { _refreshFinproAccount(true); }, 20 * 1000);
+setInterval(() => { _refreshFinproAccount(false); }, 10 * 60 * 1000);
+function _finproCallbackUrl() { return `${getPublicBaseUrl()}/api/finpro/callback`; }
 
-// Traduce el `data` de un aviso de cobro de GH Wallet al formato de BankMovement
-// (el mismo que hgcash) para que entre al MISMO pipeline de matcheo/auto-carga.
-//   status: 'held' (payment.paid con verify_state held) | 'done' (payment.verified)
-//           | 'reversed' (payment.reversed). Solo 'done' cuenta como acreditado.
-function _ghwalletMovementDoc(event, d) {
-  const verified = event === 'payment.verified' || String(d.verify_state || '').toLowerCase() === 'verified';
-  const status = event === 'payment.reversed' ? 'reversed' : (verified ? 'done' : 'held');
-  const payer = d.payer || {};
-  const amountNum = Number(d.amount);
-  return {
-    movementId: 'gw:' + String(d.id),
-    provider: 'ghwallet',
-    externalId: d.bank_reference || null,
-    coelsaCode: d.coelsa_id || null,                    // el número que figura en el comprobante
-    amount: Number.isFinite(amountNum) ? amountNum : null,
-    amountRaw: d.amount != null ? String(d.amount) : null,
-    currency: d.currency || 'ARS',
+// ── Ingesta de una transferencia ENTRANTE de Finpro → BankMovement → pipeline ──────
+// PUNTO DE EXTENSIÓN: hoy la llama la verificación por comprobante (`source:'verify'`,
+// con la `notification` de verify/incoming). Cuando el owner mande la doc de Webhooks /
+// "Listado para conciliación", esos flujos solo tienen que armar la notificación
+// `{ id, amount, coelsaId, authorizationCode, toCvu, fromCvu, fromName, fromCuit,
+// occurredAt, raw }` y llamar a esta función (source 'webhook' | 'list'), y después a
+// `hgcashMatchFromMovement(movement)` si vino sin comprobante.
+// Idempotente por movementId: 'fp:<notification.id>' (o 'fp:coelsa:<coelsa>' /
+// 'fp:auth:<autorización>' si la notificación no trae id). Status SIEMPRE 'done': verify
+// solo devuelve acreditadas y no hay reversiones por este canal.
+// `extra.coelsaId` / `extra.amount` completan lo que la notificación no trae (p. ej. el
+// coelsa del comprobante con el que Finpro confirmó la coincidencia).
+async function _finproIngestIncoming(n, source, extra) {
+  if (!n) return { movement: null, isNew: false, error: 'sin notificación' };
+  const ex = extra || {};
+  const coelsa = n.coelsaId || ex.coelsaId || null;
+  const key = n.id ? String(n.id) : (coelsa ? 'coelsa:' + coelsa : (n.authorizationCode ? 'auth:' + n.authorizationCode : null));
+  if (!key) return { movement: null, isNew: false, error: 'notificación sin id / coelsa / autorización' };
+  const amountNum = Number(n.amount);
+  const exAmount = Number(ex.amount);
+  const ev = 'finpro.' + (source || 'verify');
+  const doc = {
+    movementId: 'fp:' + key,
+    provider: 'finpro',
+    externalId: n.authorizationCode || null,
+    coelsaCode: coelsa,
+    amount: Number.isFinite(amountNum) && amountNum > 0 ? amountNum : (Number.isFinite(exAmount) && exAmount > 0 ? exAmount : null),
+    amountRaw: n.amount != null ? String(n.amount) : null,
+    currency: 'ARS',
     direction: 'Inbound',
-    status,
-    type: d.provider || null,
-    accountId: null,
-    fromName: payer.payer_name || null,
-    fromCBU: payer.payer_account || null,
-    fromCUIT: payer.payer_cuit || null,
-    toName: (_ghwalletAccountCache.accounts[0] && _ghwalletAccountCache.accounts[0].titular) || 'GH Wallet', // #339
-    toCBU: (_ghwalletAccountCache.accounts[0] && (_ghwalletAccountCache.accounts[0].cvu || _ghwalletAccountCache.accounts[0].cbu)) || null,
-    date: d.paid_at ? new Date(d.paid_at) : null,
-    topic: event,
-    eventType: event,
-    raw: d
+    status: 'done',
+    type: 'transfer',
+    accountId: finpro.account() || null,
+    fromName: n.fromName || null,
+    fromCBU: n.fromCvu || null,
+    fromCUIT: n.fromCuit || null,
+    toName: _finproAccountCache.holder || null,
+    toCBU: n.toCvu || finpro.fromCvu() || null,
+    date: n.occurredAt ? new Date(n.occurredAt) : null,
+    topic: ev,
+    eventType: ev,
+    raw: n.raw || n
   };
-}
-
-// Webhook de GH Wallet. SIN authMiddleware (lo llama el banco). Firma HMAC-SHA256 de
-// `{timestamp}.{body crudo}` con ventana de 5 min; fail-closed en producción sin
-// secreto. Dedupe por `event + data.id` (BankMovement.processedEvents). Responde 2xx
-// rápido y procesa aparte. Eventos:
-//   payment.paid      → movimiento 'held' (NO se carga: la plata no está firme)
-//   payment.verified  → status 'done' → matcheo/auto-carga (Enzo: cargar SOLO con este)
-//   payment.reversed  → 'reversed'; si ya se había cargado → ALERTA (descontar a mano)
-//   payment.expired   → ignorado (es de cobros creados por API; no creamos cobros)
-//   payout.completed / payout.failed → estado del retiro (handlePayoutStatusWebhook)
-// #338: descuento automático cuando GH Wallet revierte un cobro que ya se cargó
-// (chargeOn='paid'). Reference estable `vip-gwrev-<movementId>`: reintentar no debita dos veces.
-async function _autoDebitReversedGhwallet(m, doc) {
-  const amt = Number(doc.amount) || Number(m.amount) || 0;
-  const userId = m.matchedUserId, username = m.matchedUsername;
-  if (!userId || !username || !(amt > 0)) return { ok: false, error: 'sin usuario/monto' };
+  if (doc.date && isNaN(doc.date.getTime())) doc.date = null;
+  let isNew = false;
   try {
-    const already = await Transaction.findOne({ userId, type: 'withdrawal', 'metadata.ghwalletReversedOf': m.movementId }).lean();
-    if (already) return { ok: true, debited: Number(already.amount) || 0, partial: (Number(already.amount) || 0) < amt, repeated: true };
-    const balRes = await girox.getUserBalance(username, { fresh: true });
-    const avail = (balRes && balRes.success) ? (Number(balRes.available != null ? balRes.available : balRes.balance) || 0) : null;
-    if (avail === null) return { ok: false, error: 'no se pudo leer el saldo' };
-    const toDebit = Math.min(avail, amt);
-    if (toDebit <= 0) {
-      await BankMovement.updateOne({ movementId: m.movementId }, { $set: { chargeError: `reversed por GH Wallet: sin saldo para descontar (disponible $${avail})` } });
-      return { ok: true, debited: 0, partial: true };
-    }
-    const w = await girox.withdrawFromUser(username, toDebit, `Reversión GH Wallet - ${username}`, `vip-gwrev-${m.movementId}`);
-    if (!w || !w.success) return { ok: false, error: (w && w.error) || 'la plataforma rechazó el descuento' };
-    await Transaction.create({
-      id: uuidv4(), type: 'withdrawal', amount: toDebit, username, userId, status: 'completed',
-      description: `Descuento automático: GH Wallet revirtió la transferencia de $${amt.toLocaleString('es-AR')} (coelsa ${doc.coelsaCode || '-'})`,
-      adminId: 'system', adminUsername: 'auto-ghwallet', adminRole: 'system',
-      transactionId: w.data && (w.data.transfer_id || w.data.transferId) || null,
-      metadata: { ghwalletReversedOf: m.movementId, reversedAmount: amt, availableBefore: avail }
-    });
-    const partial = toDebit < amt;
-    await BankMovement.updateOne({ movementId: m.movementId }, { $set: { chargeError: `reversed por GH Wallet: descontados $${toDebit.toLocaleString('es-AR')}${partial ? ` de $${amt.toLocaleString('es-AR')} (saldo insuficiente)` : ''}` } });
-    try {
-      const content = await renderSystemCommand('/sys_gw_reversed',
-        '⚠️ Tu banco REVIRTIÓ la transferencia de ${amount} que ya te habíamos cargado (la plata no llegó a nuestra cuenta). Por eso descontamos ${debited} de tu saldo. Si creés que es un error, mandanos el comprobante de tu banco y lo revisamos.',
-        { amount: amt.toLocaleString('es-AR'), debited: toDebit.toLocaleString('es-AR') });
-      if (content) {
-        const msg = await Message.create({ id: uuidv4(), senderId: 'admin', senderUsername: 'Sistema', senderRole: 'admin', receiverId: userId, receiverRole: 'user', content, type: 'system', timestamp: new Date(), read: false });
-        const data = { id: msg.id, senderId: 'admin', senderUsername: 'Sistema', senderRole: 'admin', receiverId: userId, receiverRole: 'user', content, type: 'system', timestamp: msg.timestamp, read: false };
-        io.to(`user_${userId}`).emit('new_message', data);
-        io.to(`chat_${userId}`).emit('new_message', data);
-        notifyAdmins('new_message', { message: data, userId, username });
-      }
-    } catch (_) {}
-    await _emitAdminOnlyChatNote(userId, username, `↩️ GH Wallet revirtió la transferencia de $${amt.toLocaleString('es-AR')} (coelsa ${doc.coelsaCode || '-'}) que se había cargado sola. Se descontaron $${toDebit.toLocaleString('es-AR')} automáticamente${partial ? ' (NO alcanzó: terminá a mano)' : ''}.`).catch(() => {});
-    logger.warn(`[ghwallet] reversión ${m.movementId}: descontados $${toDebit} de $${amt} a ${username}${partial ? ' (PARCIAL)' : ''}`);
-    return { ok: true, debited: toDebit, partial };
-  } catch (e) {
-    logger.error(`[ghwallet] descuento por reversión falló (${m.movementId}): ${e.message}`);
-    return { ok: false, error: e.message };
-  }
-}
-// Contadores en memoria (por instancia) para el diagnóstico del panel: "¿llegó algo?".
-const _ghwalletWebhookStats = { received: 0, accepted: 0, rejected: 0, lastAt: null, lastEvent: null, lastResult: null, lastIp: null };
-function _ghwStat(result, event, req) {
-  _ghwalletWebhookStats.received++;
-  if (/^ok/.test(result)) _ghwalletWebhookStats.accepted++; else _ghwalletWebhookStats.rejected++;
-  _ghwalletWebhookStats.lastAt = new Date(); _ghwalletWebhookStats.lastEvent = event || null;
-  _ghwalletWebhookStats.lastResult = result; _ghwalletWebhookStats.lastIp = req ? req.ip : null;
-}
-app.post('/api/ghwallet/webhook', async (req, res) => {
-  try {
-    const secrets = _ghwalletWebhookSecrets();
-    const _evName = String((req.body && req.body.event) || '').toLowerCase() || null;
-    const rawBody = req.rawBody ? req.rawBody : Buffer.from(JSON.stringify(req.body || {}), 'utf8');
-    if (!secrets.length) {
-      if (process.env.NODE_ENV === 'production') {
-        logger.error('[ghwallet] webhook RECHAZADO en producción: falta el secreto (panel → GH Wallet, o GHWALLET_WEBHOOK_SECRET en SSM)');
-        _ghwStat('rechazado: sin secreto configurado', _evName, req);
-        return res.status(503).json({ error: 'webhook no configurado' });
-      }
-      logger.warn('[ghwallet] webhook recibido SIN secreto — no se valida firma (solo dev)');
-    } else {
-      const v = ghwallet.verifyWebhookSignature({
-        rawBody,
-        timestamp: req.get('X-Wallet-Timestamp') || req.get('X-Webhook-Timestamp'),
-        signature: req.get('X-Wallet-Signature') || req.get('X-Webhook-Signature'),
-        secrets
-      });
-      if (!v.ok) {
-        logger.warn(`[ghwallet] webhook con firma inválida (${v.reason}) — rechazado (ip=${req.ip} fwdBy=${req.get('X-Forwarded-By') || '-'})`);
-        _ghwStat('rechazado: ' + v.reason + (v.reason === 'firma_invalida' ? ' (el secreto del panel no coincide con el de GH Wallet)' : ''), _evName, req);
-        return res.status(v.reason === 'timestamp_viejo' || v.reason === 'sin_timestamp' ? 400 : 401).json({ error: 'firma inválida' });
-      }
-    }
-
-    // Reenvío a las otras páginas (mismos destinos que hgcash, ruta /api/ghwallet/webhook).
-    _fanoutHgcashWebhook(req, 'ghwallet');
-
-    const p = req.body || {};
-    const event = String(p.event || '').toLowerCase();
-    const d = p.data || {};
-    if (!event || !d.id) { _ghwStat('rechazado: payload sin event/data.id', _evName, req); return res.status(400).json({ error: 'payload sin event/data.id' }); }
-    _ghwStat('ok', event, req);
-
-    // Retiros: mapear al handler de hgcash (DONE / ERROR) buscando por client_ref (= payout.id).
-    if (event === 'payout.completed' || event === 'payout.failed') {
-      res.status(200).json({ ok: true });
-      handlePayoutStatusWebhook({
-        externalID: d.client_ref || null, id: d.id,
-        status: event === 'payout.completed' ? 'DONE' : 'ERROR',
-        errorCode: d.error || d.error_code || null
-      }, 'ghwallet').catch(() => {});
-      return;
-    }
-    if (!/^payment\.(paid|verified|reversed|expired)$/.test(event)) {
-      logger.info(`[ghwallet] evento ignorado: ${event} (${d.id})`);
-      return res.status(200).json({ ok: true, ignored: true });
-    }
-    if (event === 'payment.expired') return res.status(200).json({ ok: true, ignored: true });
-
-    const doc = _ghwalletMovementDoc(event, d);
-    // Dedupe atómico por event + data.id: si este evento ya se procesó, no se repite.
-    let isNew = false, fresh = null;
-    const existing = await BankMovement.findOne({ movementId: doc.movementId }).select('processedEvents matchStatus status eventType raw').lean();
-    if (!existing) {
-      try {
-        await BankMovement.create({ ...doc, matchStatus: 'pending', processedEvents: [event], createdAt: new Date() });
-        isNew = true;
-      } catch (e) { if (!e || e.code !== 11000) throw e; }
-    }
-    if (!isNew) {
-      // #337: los avisos pueden llegar DESORDENADOS (verified antes que paid, sobre todo
-      // en el reenvío del histórico). Un 'paid' tardío NO baja un movimiento ya 'done'
-      // a 'held' — solo se anota el evento. 'reversed' siempre pisa.
-      const downgrade = existing && existing.status === 'done' && doc.status === 'held';
-      const setStatus = downgrade ? existing.status : doc.status;
-      const claimed = await BankMovement.findOneAndUpdate(
-        { movementId: doc.movementId, processedEvents: { $ne: event } },
-        { $set: { status: setStatus, eventType: downgrade ? existing.eventType || event : event, topic: event, raw: downgrade ? (existing.raw || d) : d, fromName: doc.fromName, fromCBU: doc.fromCBU, fromCUIT: doc.fromCUIT, coelsaCode: doc.coelsaCode, externalId: doc.externalId }, $addToSet: { processedEvents: event } },
-        { new: true }
-      ).lean();
-      if (!claimed) {
-        logger.info(`[ghwallet] aviso repetido descartado: ${event} ${d.id}`);
-        return res.status(200).json({ ok: true, duplicate: true });
-      }
-      fresh = claimed;
-    }
-    res.status(200).json({ ok: true });
+    await BankMovement.create({ ...doc, matchStatus: 'pending', processedEvents: [ev], createdAt: new Date() });
+    isNew = true;
+  } catch (e) { if (!e || e.code !== 11000) throw e; }
+  if (isNew) {
     _emitHgcashUpdate('movimiento');
-
-    if (event === 'payment.reversed') {
-      const m = fresh || await BankMovement.findOne({ movementId: doc.movementId }).lean();
-      if (m && m.matchStatus === 'auto_charged') {
-        // #338: la plata NO quedó y las fichas YA se dieron → se descuentan SOLAS (lo que
-        // haya disponible) y se avisa; si no alcanzó, alerta para terminar a mano.
-        logger.error(`[ghwallet] REVERSIÓN de un cobro YA CARGADO: ${d.id} $${doc.amount} user=${m.matchedUsername || '?'} — descontando`);
-        const rev = await _autoDebitReversedGhwallet(m, doc);
-        if (rev.ok && !rev.partial) return;
-        await _emitAdminOnlyChatNote(m.matchedUserId, m.matchedUsername,
-          `🚨 GH WALLET REVIRTIÓ una transferencia YA cargada: $${Number(doc.amount).toLocaleString('es-AR')} (coelsa ${doc.coelsaCode || '-'}). ${rev.ok ? `Se descontaron $${Number(rev.debited).toLocaleString('es-AR')} (todo lo que tenía); FALTAN $${Number(doc.amount - rev.debited).toLocaleString('es-AR')}.` : `NO se pudo descontar (${rev.error || 'error'}).`} Terminá a mano y revisá al cliente.`).catch(() => {});
-        try { notifyAdmins('security_alert', { kind: 'ghwallet_reversed', username: m.matchedUsername, amount: doc.amount, movementId: doc.movementId }); } catch (_) {}
-        return;
-      }
-      if (m && ['pending', 'no_match', 'shadow_matched', 'needs_review'].includes(m.matchStatus)) {
-        await BankMovement.updateOne({ movementId: doc.movementId }, { $set: { matchStatus: 'ignored', chargeError: 'reversed por GH Wallet' } });
-      }
-      return;
-    }
-    const gwCfgNow = await getGhwalletConfig();
-    if (doc.status === 'done' || (doc.status === 'held' && gwCfgNow.chargeOn === 'paid')) {
-      // Verificado (o retenido con chargeOn='paid', #338) → matchear contra comprobantes.
-      const m = await BankMovement.findOne({ movementId: doc.movementId }).lean();
-      if (m) hgcashMatchFromMovement(m).catch(() => {});
-    } else {
-      logger.info(`[ghwallet] cobro en espera (held): ${d.id} $${doc.amount} de "${doc.fromName || '?'}" — se carga con payment.verified`);
-    }
-  } catch (error) {
-    logger.error(`[ghwallet] webhook error: ${error.message}`);
-    if (!res.headersSent) res.status(500).json({ error: 'error interno' });
+    logger.info(`[finpro] transferencia entrante registrada (${source || 'verify'}): ${doc.movementId} $${doc.amount} de "${doc.fromName || '?'}" coelsa=${doc.coelsaCode || '-'}`);
+  } else {
+    // Completar datos que antes no teníamos (coelsa / origen) sin tocar el estado del matcheo.
+    const set = {};
+    if (doc.coelsaCode) set.coelsaCode = doc.coelsaCode;
+    if (doc.fromName) set.fromName = doc.fromName;
+    if (doc.fromCBU) set.fromCBU = doc.fromCBU;
+    if (doc.fromCUIT) set.fromCUIT = doc.fromCUIT;
+    if (doc.externalId) set.externalId = doc.externalId;
+    await BankMovement.updateOne({ movementId: doc.movementId }, { $set: set, $addToSet: { processedEvents: ev } });
   }
-});
+  const movement = await BankMovement.findOne({ movementId: doc.movementId }).lean();
+  return { movement, isNew };
+}
 
+// ── Verificación de una carga por COMPROBANTE (sin webhook) ─────────────────────────
+// Finpro no avisa cuando entra plata: cuando el cliente manda el comprobante se le
+// PREGUNTA a Finpro (`transfers/verify/incoming`) con el dato más fuerte disponible:
+// coelsa del comprobante → (N° de operación si tiene pinta de coelsa) → monto + fecha +
+// ventana + nuestro CVU. Resultado:
+//   confirmed (exact/high) → `_finproIngestIncoming` + `hgcashAutoCarga` directo (el match
+//                            lo hizo Finpro; los candados son los de siempre)
+//   not_found_yet          → queda 'pending' y el cron `_finproReverifyTick` reintenta cada
+//                            2 min hasta 90 min (por instancia, claim atómico), después 'gave_up'
+//   ambiguous / medium     → NO se carga: `needs_review` + chat a Abiertos ("coincidencia ambigua")
+//   400/401/403            → error de configuración/permisos: se avisa y no se reintenta
+// Cada intento queda en `Comprobante.finproVerify` (diag del panel).
+const FINPRO_VERIFY_WINDOW_MIN = 180;
+const FINPRO_REVERIFY_EVERY_MS = 2 * 60 * 1000;
+const FINPRO_REVERIFY_MAX_MS = 90 * 60 * 1000;
 app.post('/api/hgcash/webhook', async (req, res) => {
   try {
     const secrets = _hgcashWebhookSecrets(); // #320: panel y/o SSM
@@ -20049,17 +19934,17 @@ app.delete('/api/admin/hgcash/fanout', authMiddleware, adminMiddleware, async (r
 });
 
 // ============================================
-// #332 GH WALLET — endpoints del panel (solo admin general)
+// #333/#368 BANCOS AUTOMÁTICOS — endpoints del panel (solo admin general)
 // ============================================
-// #333: sección general "Bancos automáticos": por cuál(es) ENTRAN las cargas y por cuál
-// SALEN los retiros. Escribe hgcash.enabled / ghwallet.enabled / bankProvider.
+// Sección general "Bancos automáticos": por cuál(es) ENTRAN las cargas y por cuál
+// SALEN los retiros. Escribe hgcash.enabled / finpro.enabled / bankProvider.
 async function _banksPayload() {
-  const [hg, gw, provider] = await Promise.all([getHgcashConfig(), getGhwalletConfig(), getBankProvider()]);
-  const incoming = hg.enabled && gw.enabled ? 'both' : (hg.enabled ? 'hgcash' : (gw.enabled ? 'ghwallet' : 'none'));
+  const [hg, fp, provider] = await Promise.all([getHgcashConfig(), getFinproConfig(), getBankProvider()]);
+  const incoming = hg.enabled && fp.enabled ? 'both' : (hg.enabled ? 'hgcash' : (fp.enabled ? 'finpro' : 'none'));
   return {
     incoming, payouts: provider,
     hgcash: { enabled: hg.enabled, mode: hg.mode, token: hgcashPay.getTokenSource(), secret: _hgcashWebhookSecrets().length > 0, accountName: hg.accountName || '', cbu: hg.cbu || '' },
-    ghwallet: { enabled: gw.enabled, mode: gw.mode, chargeOn: gw.chargeOn, token: ghwallet.getTokenSource(), secret: _ghwalletWebhookSecrets().length > 0, test: ghwallet.isTestToken() }
+    finpro: { enabled: fp.enabled, mode: fp.mode, credentials: finpro.getCredentialSource(), readyPayouts: finpro.isReadyForPayouts(), readyIncoming: finpro.isReadyForIncoming(), dev: finpro.isDevUrl(), fromCvu: finpro.fromCvu() ? '…' + finpro.fromCvu().slice(-6) : '', account: !!finpro.account() }
   };
 }
 // #334 Webhooks salientes — CRUD desde el panel (solo admin general).
@@ -20128,17 +20013,19 @@ app.post('/api/admin/banks', authMiddleware, adminMiddleware, async (req, res) =
     const b = req.body || {};
     const incoming = String(b.incoming || '').toLowerCase();
     const payouts = String(b.payouts || '').toLowerCase();
-    if (!['hgcash', 'ghwallet', 'both', 'none'].includes(incoming)) return res.status(400).json({ error: 'Opción de cargas inválida' });
+    if (!['hgcash', 'finpro', 'both', 'none'].includes(incoming)) return res.status(400).json({ error: 'Opción de cargas inválida' });
     if (!BANK_PROVIDERS.includes(payouts)) return res.status(400).json({ error: 'Banco de retiros inválido' });
     const hgOn = incoming === 'hgcash' || incoming === 'both';
-    const gwOn = incoming === 'ghwallet' || incoming === 'both';
+    const fpOn = incoming === 'finpro' || incoming === 'both';
     const hg = await getHgcashConfig();
     if (hgOn && !hg.accountName && !hg.cbu) return res.status(400).json({ error: 'Para recibir por hgcash cargá primero el NOMBRE de la cuenta (o el CBU) en el bloque de hgcash.' });
-    if (gwOn && !ghwallet.isEnabled()) return res.status(400).json({ error: 'Para recibir por GH Wallet cargá primero su token en el bloque de GH Wallet ("Probar y guardar").' });
-    if (gwOn && !_ghwalletWebhookSecrets().length) return res.status(400).json({ error: 'Para recibir por GH Wallet cargá también el secreto del webhook: sin él sus avisos se rechazan.' });
+    if (fpOn && !finpro.isEnabled()) return res.status(400).json({ error: 'Para recibir por Finpro cargá primero su API Key y API Secret en el bloque de Finpro ("Probar y guardar").' });
+    if (fpOn && !finpro.isReadyForIncoming()) return res.status(400).json({ error: 'Para recibir por Finpro cargá también NUESTRO CVU (22 dígitos) o el número de cuenta en el bloque de Finpro: sin eso no se puede verificar a qué cuenta entró la plata.' });
+    if (payouts === 'finpro' && !finpro.isEnabled()) return res.status(400).json({ error: 'Para pagar retiros por Finpro cargá primero su API Key y API Secret en el bloque de Finpro.' });
+    if (payouts === 'finpro' && !finpro.isReadyForPayouts()) return res.status(400).json({ error: 'Para pagar retiros por Finpro cargá NUESTRO CVU de origen (22 dígitos) en el bloque de Finpro.' });
     if (hgOn !== hg.enabled) await setConfig('hgcash', Object.assign({}, hg, { enabled: hgOn }));
-    const gw = await getGhwalletConfig();
-    if (gwOn !== gw.enabled) await Config.set('ghwallet', Object.assign({}, gw, { enabled: gwOn }), req.user.username);
+    const fp = await getFinproConfig();
+    if (fpOn !== fp.enabled) await Config.set('finpro', { enabled: fpOn, mode: fp.mode }, req.user.username);
     await Config.set('bankProvider', payouts, req.user.username);
     logger.info(`[banks] ${req.user.username}: cargas por ${incoming} · retiros por ${_bankLabel(payouts)}`);
     res.json(Object.assign({ success: true }, await _banksPayload()));
@@ -20150,116 +20037,206 @@ app.post('/api/admin/banks', authMiddleware, adminMiddleware, async (req, res) =
 
 app.get('/api/admin/bank-provider', authMiddleware, adminMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
-  res.json({ provider: await getBankProvider(), options: BANK_PROVIDERS, hgcashReady: hgcashPay.isEnabled(), ghwalletReady: ghwallet.isEnabled() });
+  res.json({ provider: await getBankProvider(), options: BANK_PROVIDERS, hgcashReady: hgcashPay.isEnabled(), finproReady: finpro.isReadyForPayouts() });
 });
 app.post('/api/admin/bank-provider', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
     const v = String((req.body && req.body.provider) || '').toLowerCase();
     if (!BANK_PROVIDERS.includes(v)) return res.status(400).json({ error: 'Banco inválido' });
+    if (v === 'finpro' && !finpro.isReadyForPayouts()) return res.status(400).json({ error: 'Finpro no está listo para pagar: cargá API Key/Secret y nuestro CVU de origen en el bloque de Finpro.' });
     await Config.set('bankProvider', v, req.user.username);
     logger.info(`[bank-provider] ${req.user.username}: los retiros salen por ${_bankLabel(v)}`);
     res.json({ success: true, provider: v });
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
-app.get('/api/admin/ghwallet/config', authMiddleware, adminMiddleware, async (req, res) => {
+
+// ============================================
+// #368 FINPRO — endpoints del panel (solo admin general)
+// ============================================
+function _finproPublicState() {
+  const st = finpro.settingsPublic();
+  return {
+    credentials: finpro.getCredentialSource(),
+    ready: { payouts: finpro.isReadyForPayouts(), incoming: finpro.isReadyForIncoming() },
+    settings: { baseUrl: st.baseUrl, bankId: st.bankId, account: st.account, fromCvu: st.fromCvu, source: st.source },
+    dev: st.dev,
+    defaultBaseUrl: finpro.DEFAULT_BASE_URL,
+    callbackUrl: _finproCallbackUrl(),
+    holder: _finproAccountCache.holder ? { nombre: _finproAccountCache.holder, cuit: _finproAccountCache.cuit, at: _finproAccountCache.at ? new Date(_finproAccountCache.at) : null } : null
+  };
+}
+app.get('/api/admin/finpro/config', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
-    const cfg = await getGhwalletConfig();
-    res.json(Object.assign({}, cfg, { tokenConfigured: ghwallet.isEnabled(), secretConfigured: _ghwalletWebhookSecrets().length > 0, test: ghwallet.isTestToken(), webhookFullUrl: `${getPublicBaseUrl()}/api/ghwallet/webhook` }));
+    const cfg = await getFinproConfig();
+    res.json(Object.assign({ enabled: cfg.enabled, mode: cfg.mode }, _finproPublicState()));
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
-app.post('/api/admin/ghwallet/config', authMiddleware, adminMiddleware, async (req, res) => {
+app.post('/api/admin/finpro/config', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
     const b = req.body || {};
-    const cur = await getGhwalletConfig();
-    const next = { enabled: typeof b.enabled === 'boolean' ? b.enabled : cur.enabled, mode: b.mode === 'auto' ? 'auto' : (b.mode === 'shadow' ? 'shadow' : cur.mode),
-      chargeOn: b.chargeOn === 'paid' ? 'paid' : (b.chargeOn === 'verified' ? 'verified' : cur.chargeOn) };
-    if (next.enabled && !ghwallet.isEnabled()) return res.status(400).json({ error: 'Cargá primero el token de GH Wallet (abajo, "Probar y guardar").' });
-    await Config.set('ghwallet', next, req.user.username);
-    logger.info(`[ghwallet] config: ${req.user.username} → ${next.enabled ? 'ACTIVO' : 'apagado'} modo ${next.mode}`);
-    res.json(Object.assign({ success: true }, next));
+    const cur = await getFinproConfig();
+    const next = { enabled: cur.enabled, mode: b.mode === 'auto' ? 'auto' : 'shadow' };
+    await Config.set('finpro', next, req.user.username);
+    logger.info(`[finpro] config: ${req.user.username} → ${next.enabled ? 'ACTIVO' : 'apagado'} modo ${next.mode}`);
+    res.json(Object.assign({ success: true }, next, _finproPublicState()));
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
-app.get('/api/admin/ghwallet/credentials', authMiddleware, adminMiddleware, async (req, res) => {
+app.get('/api/admin/finpro/credentials', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
-    await _loadGhwalletCredentials();
-    _refreshGhwalletAccount(true).catch(() => {});
-    const m = _ghwalletCredMeta || {};
-    res.json({
-      tokenSource: ghwallet.getTokenSource(),
-      panelToken: !!m.tokenLast4, panelSecret: !!m.secretLast4,
-      tokenLast4: m.tokenLast4 || null, secretLast4: m.secretLast4 || null,
+    await _loadFinproCredentials();
+    _refreshFinproAccount(true).catch(() => {});
+    const m = _finproCredMeta || {};
+    res.json(Object.assign({
+      apiKeyLast4: m.apiKeyLast4 || null, apiSecretLast4: m.apiSecretLast4 || null,
       updatedBy: m.updatedBy || null, updatedAt: m.updatedAt || null, decryptError: !!m.decryptError,
-      ssmToken: !!process.env.GHWALLET_API_TOKEN, ssmSecret: !!process.env.GHWALLET_WEBHOOK_SECRET,
-      test: ghwallet.isTestToken(),
-      webhookFullUrl: `${getPublicBaseUrl()}/api/ghwallet/webhook`
-    });
+      ssmKey: !!process.env.FINPRO_API_KEY, ssmSecret: !!process.env.FINPRO_API_SECRET,
+      env: { baseUrl: process.env.FINPRO_API_URL || null, bankId: process.env.FINPRO_BANK_ID || null, account: process.env.FINPRO_ACCOUNT ? '…' + String(process.env.FINPRO_ACCOUNT).slice(-4) : null, fromCvu: process.env.FINPRO_FROM_CVU ? '…' + String(process.env.FINPRO_FROM_CVU).slice(-6) : null }
+    }, _finproPublicState()));
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
-app.post('/api/admin/ghwallet/credentials', authMiddleware, adminMiddleware, async (req, res) => {
+// Guarda credenciales + datos de la cuenta. Antes de guardar PRUEBA: token de cliente y,
+// si hay número de cuenta, el saldo. Los campos vacíos conservan lo que ya había.
+app.post('/api/admin/finpro/credentials', authMiddleware, adminMiddleware, async (req, res) => {
+  const prevSettings = Object.assign({}, finpro.settingsPublic());
+  let settingsTouched = false;
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
     const b = req.body || {};
-    const token = typeof b.token === 'string' ? b.token.trim() : '';
-    const secret = typeof b.webhookSecret === 'string' ? b.webhookSecret.trim() : '';
-    if (!token && !secret) return res.status(400).json({ error: 'Pegá el token de API y/o el secreto del webhook' });
-    if (token && (!/^gw_(live|test)_/i.test(token) || token.length > 300 || /\s/.test(token))) return res.status(400).json({ error: 'El token no parece válido (empieza con gw_live_ o gw_test_)' });
-    if (secret && (secret.length < 8 || secret.length > 300 || /\s/.test(secret))) return res.status(400).json({ error: 'El secreto no parece válido' });
-    let accounts = null;
-    if (token) {
-      const t = await ghwallet.getAccount(token);
-      if (!t.ok) return res.status(400).json({ error: `GH Wallet rechazó ese token (${t.errorCode || t.httpStatus || t.error}). No se guardó nada.` });
-      accounts = t.accounts;
+    const cur = (await getConfig('finproCredentials', null)) || {};
+    const apiKeyNew = typeof b.apiKey === 'string' ? b.apiKey.trim() : '';
+    const apiSecretNew = typeof b.apiSecret === 'string' ? b.apiSecret.trim() : '';
+    if (/\s/.test(apiKeyNew) || /\s/.test(apiSecretNew)) return res.status(400).json({ error: 'La API Key / Secret no pueden tener espacios.' });
+    const fromCvu = b.fromCvu !== undefined ? String(b.fromCvu || '').replace(/\D/g, '') : String(cur.fromCvu || '');
+    if (fromCvu && fromCvu.length !== 22) return res.status(400).json({ error: 'Nuestro CVU tiene que tener 22 dígitos.' });
+    const account = b.account !== undefined ? String(b.account || '').trim().slice(0, 40) : String(cur.account || '');
+    const bankId = b.bankId !== undefined ? String(b.bankId || '').trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) : String(cur.bankId || '');
+    let baseUrl = b.baseUrl !== undefined ? String(b.baseUrl || '').trim().replace(/\/+$/, '') : String(cur.baseUrl || '');
+    if (baseUrl && !/^https:\/\/[a-z0-9.-]+(:\d+)?(\/.*)?$/i.test(baseUrl)) return res.status(400).json({ error: 'La URL base tiene que empezar con https:// (ej: https://mw-dev.finpro.com.ar).' });
+    // Credenciales a probar: las nuevas, o las vigentes del panel, o las de SSM.
+    let apiKey = apiKeyNew, apiSecret = apiSecretNew;
+    if (!apiKey || !apiSecret) {
+      let curKey = null, curSecret = null;
+      try { curKey = cur.apiKeyEnc ? _credDecrypt(cur.apiKeyEnc) : null; curSecret = cur.apiSecretEnc ? _credDecrypt(cur.apiSecretEnc) : null; } catch (_) {}
+      apiKey = apiKey || curKey || process.env.FINPRO_API_KEY || '';
+      apiSecret = apiSecret || curSecret || process.env.FINPRO_API_SECRET || '';
     }
-    const cur = (await getConfig('ghwalletCredentials', null)) || {};
-    const next = Object.assign({}, cur, { updatedBy: req.user.username, updatedAt: new Date().toISOString() });
-    if (token) { next.tokenEnc = _credEncrypt(token); next.tokenLast4 = token.slice(-4); }
-    if (secret) { next.secretEnc = _credEncrypt(secret); next.secretLast4 = secret.slice(-4); }
-    await Config.set('ghwalletCredentials', next, req.user.username);
-    await _loadGhwalletCredentials();
-    _refreshGhwalletAccount(true).catch(() => {});
-    logger.info(`[ghwallet] credenciales del panel actualizadas por ${req.user.username} (${token ? 'token' : ''}${token && secret ? '+' : ''}${secret ? 'secreto' : ''})`);
-    res.json({ success: true, accounts, test: ghwallet.isTestToken() });
+    if (!apiKey || !apiSecret) return res.status(400).json({ error: 'Faltan la API Key y el API Secret de Finpro (los dos).' });
+    // Probar con los settings NUEVOS (se aplican en memoria y se restauran si falla).
+    finpro.setSettingsOverride({ baseUrl, bankId, account, fromCvu });
+    settingsTouched = true;
+    const creds = { apiKey, apiSecret };
+    const tok = await finpro.getClientToken({ creds, force: true });
+    if (!tok.ok) {
+      finpro.setSettingsOverride(prevSettings.source === 'panel' ? { baseUrl: cur.baseUrl || '', bankId: cur.bankId || '', account: cur.account || '', fromCvu: cur.fromCvu || '' } : {});
+      settingsTouched = false;
+      return res.status(400).json({ error: `Finpro rechazó las credenciales (${tok.httpStatus ? 'HTTP ' + tok.httpStatus + ' ' : ''}${tok.error || 'sin token'}). No se guardó nada.`, httpStatus: tok.httpStatus || 0 });
+    }
+    let balance = null, balanceError = null;
+    if (account) {
+      const bal = await finpro.getBalance({ account, creds });
+      if (!bal.ok) {
+        finpro.setSettingsOverride(prevSettings.source === 'panel' ? { baseUrl: cur.baseUrl || '', bankId: cur.bankId || '', account: cur.account || '', fromCvu: cur.fromCvu || '' } : {});
+        settingsTouched = false;
+        return res.status(400).json({ error: `El token anduvo pero el saldo de la cuenta "${account}" falló (${bal.httpStatus ? 'HTTP ' + bal.httpStatus + ' ' : ''}${bal.error || bal.description || 'sin detalle'}). Revisá el número de cuenta. No se guardó nada.` });
+      }
+      balance = { balance: bal.balance, available: bal.available, currency: bal.currency, raw: bal.data };
+    } else balanceError = 'sin número de cuenta: no se consultó el saldo';
+    let holder = null;
+    if (fromCvu) { try { const h = await finpro.getAccountInformation({ cvu: fromCvu, creds }); if (h.ok && h.found) holder = { nombre: h.nombre, cuit: h.cuit }; } catch (_) {} }
+    const next = {
+      apiKeyEnc: apiKeyNew ? _credEncrypt(apiKeyNew) : (cur.apiKeyEnc || null),
+      apiSecretEnc: apiSecretNew ? _credEncrypt(apiSecretNew) : (cur.apiSecretEnc || null),
+      apiKeyLast4: apiKeyNew ? apiKeyNew.slice(-4) : (cur.apiKeyLast4 || null),
+      apiSecretLast4: apiSecretNew ? apiSecretNew.slice(-4) : (cur.apiSecretLast4 || null),
+      bankId, account, fromCvu, baseUrl,
+      updatedBy: req.user.username, updatedAt: new Date().toISOString()
+    };
+    await Config.set('finproCredentials', next, req.user.username);
+    await _loadFinproCredentials();
+    settingsTouched = false;
+    _refreshFinproAccount(true).catch(() => {});
+    logger.info(`[finpro] credenciales/cuenta del panel actualizadas por ${req.user.username} (${apiKeyNew ? 'key' : ''}${apiKeyNew && apiSecretNew ? '+' : ''}${apiSecretNew ? 'secret' : ''}${fromCvu ? ' cvu…' + fromCvu.slice(-4) : ''}${baseUrl ? ' url=' + baseUrl : ''})`);
+    res.json(Object.assign({ success: true, token: { ok: true, expiresAt: tok.expiresAt ? new Date(tok.expiresAt) : null }, balance, balanceError, holder }, _finproPublicState()));
   } catch (e) {
-    logger.error(`[ghwallet] guardar credenciales falló: ${e.message}`);
+    if (settingsTouched) { try { await _loadFinproCredentials(); } catch (_) {} }
+    logger.error(`[finpro] guardar credenciales falló: ${e.message}`);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
-app.delete('/api/admin/ghwallet/credentials', authMiddleware, adminMiddleware, async (req, res) => {
+app.delete('/api/admin/finpro/credentials', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
-    await Config.deleteOne({ key: 'ghwalletCredentials' });
-    await _loadGhwalletCredentials();
-    _refreshGhwalletAccount(true).catch(() => {});
-    logger.info(`[ghwallet] credenciales del panel borradas por ${req.user.username} (vuelve a SSM)`);
-    res.json({ success: true, tokenSource: ghwallet.getTokenSource() });
+    await Config.deleteOne({ key: 'finprocredentials' });
+    await _loadFinproCredentials();
+    _refreshFinproAccount(true).catch(() => {});
+    logger.info(`[finpro] credenciales del panel borradas por ${req.user.username} (vuelve a SSM/env)`);
+    res.json(Object.assign({ success: true }, _finproPublicState()));
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
-// Cuenta de depósito (titular / CVU / alias / cuit) + saldo de GH Wallet.
-// Diagnóstico: qué avisos intentó mandar GH Wallet (su API) + qué recibimos nosotros.
-app.get('/api/admin/ghwallet/webhooks', authMiddleware, adminMiddleware, async (req, res) => {
+// Cuenta: saldo (accounts/balance) + titular de nuestro CVU (accounts/information).
+app.get('/api/admin/finpro/account', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
-    const out = { local: Object.assign({}, _ghwalletWebhookStats), secretConfigured: _ghwalletWebhookSecrets().length > 0, webhookFullUrl: getPublicBaseUrl() + '/api/ghwallet/webhook', remote: null, remoteError: null };
-    if (ghwallet.isEnabled()) {
-      const r = await ghwallet.listWebhooks({ limit: 20 });
-      if (r.ok) out.remote = r.data; else out.remoteError = r.error || ('HTTP ' + r.httpStatus);
-    } else out.remoteError = 'sin token';
-    res.json(out);
+    if (!finpro.isEnabled()) return res.json(Object.assign({ enabled: false, balance: null }, _finproPublicState()));
+    await _refreshFinproAccount(req.query.fresh === '1');
+    let balance = null, balanceError = null;
+    if (finpro.account()) {
+      const bal = await finpro.getBalance();
+      if (bal.ok) balance = { balance: bal.balance, available: bal.available, currency: bal.currency, raw: bal.data };
+      else balanceError = (bal.httpStatus ? 'HTTP ' + bal.httpStatus + ' ' : '') + (bal.error || bal.description || 'sin detalle');
+    } else balanceError = 'Falta el número de cuenta de Finpro (bloque Finpro → "Probar y guardar").';
+    res.json(Object.assign({ enabled: true, balance, balanceError }, _finproPublicState()));
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
-app.get('/api/admin/ghwallet/account', authMiddleware, adminMiddleware, async (req, res) => {
+// Diagnóstico: últimas llamadas a Finpro (por instancia), estado del token, callbacks
+// recibidos, comprobantes en re-verificación y últimos movimientos/pagos de Finpro.
+app.get('/api/admin/finpro/diag', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
-    if (!ghwallet.isEnabled()) return res.json({ enabled: false, accounts: [], balance: null });
-    const [acc, bal] = await Promise.all([ghwallet.getAccount(), ghwallet.getBalance()]);
+    const since = new Date(Date.now() - 24 * 3600 * 1000);
+    const [pendingVerify, recentVerify, movements, payouts] = await Promise.all([
+      Comprobante.countDocuments({ finproVerifyStatus: 'pending' }),
+      Comprobante.find({ finproVerifyStatus: { $ne: null }, createdAt: { $gte: since } }).sort({ createdAt: -1 }).limit(15)
+        .select('id username amount coelsaCode operationNumber createdAt finproVerifyStatus finproVerify.attempts finproVerify.lastAt finproVerify.last finproVerify.nextAt finproVerify.movementId bankMatchStatus autoCharged').lean(),
+      BankMovement.find({ provider: 'finpro' }).sort({ createdAt: -1 }).limit(10).select('movementId amount fromName coelsaCode externalId matchStatus matchedUsername createdAt date').lean(),
+      PendingPayout.find({ paidVia: 'finpro' }).sort({ createdAt: -1 }).limit(10).select('id username amount status hgStatus fpProcessId fpTransactionId fpCoelsaId fpAccepted error createdAt paidAt').lean()
+    ]);
+    res.json(Object.assign({
+      service: finpro.getDiag(),
+      callbacks: Object.assign({}, _finproCallbackStats),
+      verify: { pending: pendingVerify, recent: recentVerify, everyMin: FINPRO_REVERIFY_EVERY_MS / 60000, maxMin: FINPRO_REVERIFY_MAX_MS / 60000, windowMin: FINPRO_VERIFY_WINDOW_MIN },
+      movements, payouts
+    }, _finproPublicState()));
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+// Verificación MANUAL de una transferencia entrante (coelsa | autorización | monto+fecha).
+// Solo consulta y muestra: no crea movimientos ni carga (eso lo hace el flujo del comprobante).
+app.post('/api/admin/finpro/verify', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    if (!finpro.isEnabled()) return res.status(400).json({ error: 'Finpro no está configurado (API Key/Secret).' });
+    const b = req.body || {};
+    const input = {};
+    if (b.coelsaId) input.coelsaId = String(b.coelsaId).trim().toUpperCase();
+    else if (b.authorizationCode) input.authorizationCode = String(b.authorizationCode).trim();
+    else {
+      input.amount = Number(b.amount);
+      if (!(input.amount > 0)) return res.status(400).json({ error: 'Poné el código COELSA, el código de autorización, o el monto (y la fecha).' });
+      const d = b.occurredAt ? new Date(b.occurredAt) : new Date();
+      if (isNaN(d.getTime())) return res.status(400).json({ error: 'Fecha inválida.' });
+      input.occurredAt = d;
+      input.windowMinutes = Math.min(1440, Math.max(1, Number(b.windowMinutes) || FINPRO_VERIFY_WINDOW_MIN));
+    }
+    const r = await finpro.verifyIncoming(input);
+    logger.info(`[finpro] verificación manual por ${req.user.username} (${r.requestKind}) → ${r.ok ? (r.status || 'sin estado') : 'HTTP ' + r.httpStatus + ' ' + (r.error || '')}`);
     res.json({
-      enabled: true, test: ghwallet.isTestToken(),
-      accounts: acc.ok ? acc.accounts : [], accountError: acc.ok ? null : (acc.error || acc.errorCode),
-      balance: bal.ok ? { available: bal.available, total: bal.total, currency: bal.currency } : null, balanceError: bal.ok ? null : (bal.error || bal.errorCode)
+      ok: r.ok, httpStatus: r.httpStatus, status: r.status, matchedBy: r.matchedBy, confidence: r.confidence,
+      notification: r.notification, matches: r.matches, searchedScope: r.searchedScope, error: r.error || null,
+      request: Object.assign({}, r.requestBody), raw: r.data
     });
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
@@ -20321,7 +20298,7 @@ app.get('/api/admin/hgcash/movements', authMiddleware, adminMiddleware, async (r
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
     const q = {};
     if (req.query.status) q.matchStatus = String(req.query.status);
-    if (req.query.provider === 'ghwallet') q.provider = 'ghwallet'; // #333
+    if (['finpro', 'ghwallet'].includes(req.query.provider)) q.provider = req.query.provider; // #333/#368 ('ghwallet' = histórico)
     else if (req.query.provider === 'hgcash') q.provider = { $in: ['hgcash', null] };
     const total = await BankMovement.countDocuments(q);
     const movements = await BankMovement.find(q)
@@ -20796,8 +20773,8 @@ app.get('/api/admin/payouts', authMiddleware, withdrawerMiddleware, async (req, 
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const total = await PendingPayout.countDocuments(q);
     const payouts = await PendingPayout.find(q).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean();
-    const _prov = await getBankProvider(); // #332
-    res.json({ payouts, total, page, totalPages: total === 0 ? 0 : Math.ceil(total / limit), payEnabled: _prov === 'ghwallet' ? ghwallet.isEnabled() : hgcashPay.isEnabled(), bankProvider: _prov });
+    const _prov = await getBankProvider(); // #332/#368
+    res.json({ payouts, total, page, totalPages: total === 0 ? 0 : Math.ceil(total / limit), payEnabled: _prov === 'finpro' ? finpro.isReadyForPayouts() : hgcashPay.isEnabled(), bankProvider: _prov });
   } catch (error) {
     console.error('Error listando payouts:', error);
     res.status(500).json({ error: 'Error del servidor' });
@@ -20922,112 +20899,9 @@ async function _deductChipsAtConfirm(payout, agentUser) {
 }
 
 // El agente CONFIRMA el pago → se ejecuta el cash-out automático en hgcash.
-// #332: el retiro sale por el banco elegido en el panel (Config['bankProvider']).
-async function _payPayoutViaGhwallet(req, res) {
-  try {
-    const { id } = req.params;
-    if (!ghwallet.isEnabled()) {
-      return res.status(400).json({ error: 'GH Wallet no está configurado (falta el token: panel → GH Wallet, o GHWALLET_API_TOKEN). Pagá manual.' });
-    }
-    const payout = await PendingPayout.findOne({ id });
-    if (!payout) return res.status(404).json({ error: 'Pago no encontrado' });
-    if (!['pending_review', 'failed'].includes(payout.status)) {
-      return res.status(400).json({ error: `El pago ya está en estado "${payout.status}".` });
-    }
-    // GH Wallet paga SOLO a CBU/CVU de 22 dígitos (no resuelve alias).
-    const resolvedCbu = String(payout.resolvedCbu || payout.cbu || '').replace(/\D/g, '');
-    if (resolvedCbu.length !== 22) {
-      return res.status(400).json({ error: 'GH Wallet necesita el CBU/CVU de 22 dígitos (no acepta alias). Pedíselo al cliente o pagá por otro banco.' });
-    }
-    const claimed = await PendingPayout.findOneAndUpdate(
-      { id, status: { $in: ['pending_review', 'failed'] } },
-      { $set: { status: 'paying', resolvedCbu, paidBy: req.user.username, error: null } },
-      { new: true }
-    );
-    if (!claimed) return res.status(409).json({ error: 'El pago ya está siendo procesado.' });
-
-    // Descontar las fichas AHORA (mismo flujo y mismo guard que hgcash, ver /pay).
-    if (claimed.deductAtPay === true && claimed.debitConfirmed !== true) {
-      const ded = await _deductChipsAtConfirm(claimed, req.user);
-      if (!ded.ok) {
-        if (ded.insufficient) {
-          return res.json({ success: false, insufficient: true, message: 'Saldo insuficiente: no se descontó ni se pagó. Se avisó al cliente y se cerró el chat.' });
-        }
-        return res.status(400).json({ error: ded.error || 'No se pudieron descontar las fichas.' });
-      }
-    }
-
-    const result = await ghwallet.createPayout({
-      amount: payout.amount,
-      cbuCvu: resolvedCbu,
-      beneficiaryName: payout.titular || undefined,
-      clientRef: payout.id,
-      idempotencyKey: `vip-payout-${payout.id}` // reintento = mismo retiro, nunca dos
-    });
-
-    // 409 duplicate_of: un retiro IGUAL ya está en vuelo → seguirlo, no crear otro.
-    if (!result.ok && result.httpStatus === 409 && result.duplicateOf) {
-      await PendingPayout.updateOne({ id }, { $set: { status: 'paying', gwPayoutId: result.duplicateOf, hgStatus: 'processing', paidVia: 'ghwallet' } });
-      setTimeout(function () { _pollPayingPayouts(); }, 7000);
-      return res.json({ success: true, message: 'GH Wallet ya tenía este retiro en curso (se sigue ese).', status: 'paying' });
-    }
-    // 202 en vuelo: quedó registrado; NO reintentar → se confirma por webhook/poll.
-    if (result.httpStatus === 202 && result.id) {
-      await PendingPayout.updateOne({ id }, { $set: { status: 'paying', gwPayoutId: result.id, hgStatus: result.status || 'processing', paidVia: 'ghwallet' } });
-      setTimeout(function () { _pollPayingPayouts(); }, 7000);
-      logger.info(`[ghwallet-pay] retiro EN VUELO payout=${id} user=${payout.username} $${payout.amount} gwId=${result.id} por ${req.user.username}`);
-      return res.json({ success: true, status: 'paying', gwPayoutId: result.id });
-    }
-    if (!result.ok) {
-      // 500 con id: el retiro quedó registrado → consultarlo, no mandar otro.
-      if (result.httpStatus === 500 && result.id) {
-        await PendingPayout.updateOne({ id }, { $set: { status: 'paying', gwPayoutId: result.id, hgStatus: 'error?', paidVia: 'ghwallet' } });
-        setTimeout(function () { _pollPayingPayouts(); }, 7000);
-        return res.json({ success: true, status: 'paying', message: 'GH Wallet respondió error pero registró el retiro: se consulta su estado.' });
-      }
-      let msg = result.error || 'error';
-      if (result.needsConfirmation && result.recentDuplicate) {
-        msg = `GH Wallet detectó un pago IGUAL al mismo destino hace ${result.recentDuplicate.minutesAgo} min (${result.recentDuplicate.id}). No se mandó otro: verificá si ya salió; si es un pago aparte, pagalo por otro banco.`;
-      } else if (result.errorCode === 'permiso_faltante') {
-        msg = 'La clave de GH Wallet no tiene permiso para ordenar retiros (payouts:create): pedíselo a la administración de GH Wallet.';
-      } else if (result.errorCode === 'saldo_insuficiente') {
-        msg = 'Saldo insuficiente en GH Wallet para este retiro (incluye el cargo fijo). Cargá saldo y reintentá.';
-      } else if (result.errorCode === 'saldo_retenido') {
-        msg = `GH Wallet tiene $${Number(result.montoRetenido || 0).toLocaleString('es-AR')} todavía en verificación: reintentá en ${result.retryAfter || 60} segundos.`;
-      } else if (result.errorCode === 'retiro_no_disponible') {
-        msg = `GH Wallet no puede pagar ahora (${result.motivo || 'sin liquidez'}): reintentá en ${result.retryAfter || 120} segundos.`;
-      } else if (result.errorCode === 'retiro_no_permitido') {
-        msg = `GH Wallet rechazó el destino (${result.motivo || 'no permitido'}). Corregí el pedido o pagá por otro banco.`;
-      }
-      await PendingPayout.updateOne({ id }, { $set: { status: 'failed', paidVia: 'ghwallet', error: String(msg).slice(0, 300) } });
-      if (claimed.deductAtPay === true) {
-        await _emitAdminOnlyChatNote(claimed.userId, claimed.username,
-          `💸 ⚠️ El PAGO en GH Wallet FALLÓ (${msg}) — pero las fichas YA fueron descontadas correctamente: se le descontó $${Number(claimed.amount).toLocaleString('es-AR')}. NO devuelvas: pagá manual ("otro banco") o reintentá.`);
-      }
-      return res.status(400).json({ error: 'No se pudo iniciar el pago en GH Wallet: ' + msg });
-    }
-
-    const isDone = result.status === 'completed';
-    await PendingPayout.updateOne({ id }, {
-      $set: {
-        gwPayoutId: result.id || null, hgStatus: result.status || 'pending', paidVia: 'ghwallet',
-        status: isDone ? 'paid' : 'paying', paidAt: isDone ? new Date() : null
-      }
-    });
-    if (isDone) await notifyPayoutPaid(claimed);
-    else setTimeout(function () { _pollPayingPayouts(); }, 7000);
-    logger.info(`[ghwallet-pay] retiro payout=${id} user=${payout.username} $${payout.amount} gwId=${result.id} status=${result.status} por ${req.user.username}`);
-    res.json({ success: true, status: isDone ? 'paid' : 'paying', gwPayoutId: result.id, gwStatus: result.status });
-  } catch (error) {
-    console.error('Error pagando payout (GH Wallet):', error);
-    res.status(500).json({ error: 'Error del servidor' });
-  }
-}
-
 app.post('/api/admin/payouts/:id/pay', authMiddleware, withdrawerMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    if ((await getBankProvider()) === 'ghwallet') return _payPayoutViaGhwallet(req, res); // #332
     if (!hgcashPay.isEnabled()) {
       return res.status(400).json({ error: 'Pago automático no configurado (falta HGCASH_API_TOKEN). Pagá manual.' });
     }
@@ -21391,14 +21265,8 @@ app.post('/api/admin/payouts/:id/sync', authMiddleware, withdrawerMiddleware, as
   try {
     const payout = await PendingPayout.findOne({ id: req.params.id }).lean();
     if (!payout) return res.status(404).json({ error: 'Pago no encontrado.' });
-    if (payout.paidVia === 'ghwallet') { // #332
-      if (!ghwallet.isEnabled()) return res.status(400).json({ error: 'GH Wallet no está configurado.' });
-      if (!payout.gwPayoutId) return res.status(400).json({ error: 'Este pago no tiene retiro en GH Wallet para consultar.' });
-      const st = await ghwallet.getPayout(payout.gwPayoutId);
-      if (!st.ok || !st.status) return res.status(502).json({ error: 'No se pudo consultar el estado en GH Wallet: ' + (st.error || 's/estado') });
-      await handlePayoutStatusWebhook({ externalID: payout.id, id: payout.gwPayoutId, status: _ghwalletPayoutStatusToHg(st.status), errorCode: st.payoutError }, 'ghwallet');
-      const fresh = await PendingPayout.findOne({ id: payout.id }).select('status hgStatus').lean();
-      return res.json({ success: true, status: fresh ? fresh.status : payout.status, hgStatus: st.status });
+    if (payout.paidVia === 'ghwallet') { // histórico: GH Wallet ya no está integrado (#368)
+      return res.status(400).json({ error: 'Este pago salió por GH Wallet, que ya no está integrado: verificalo a mano en el panel de GH Wallet y marcalo con "Pagar con otro banco" o Descartar.' });
     }
     if (!hgcashPay.isEnabled()) return res.status(400).json({ error: 'Pago automático no configurado.' });
     if (!payout.hgTransactionId) return res.status(400).json({ error: 'Este pago no tiene transacción hgcash para consultar.' });
@@ -23048,30 +22916,14 @@ setInterval(function () { _runInactividadTick(); }, 6 * 60 * 60 * 1000);
 // hgcash y, si está DONE, marca pagado + avisa al cliente + manda el comprobante (TODO
 // idempotente vía handlePayoutStatusWebhook: status==='paid' corta, receiptSentAt no
 // duplica). Solo pagos RECIENTES (últimas 2h) para NO resucitar ni spamear pagos viejos.
-// #332: estado de GH Wallet → el que entiende handlePayoutStatusWebhook (DONE/ERROR/otros).
-function _ghwalletPayoutStatusToHg(st) {
-  const v = String(st || '').toLowerCase();
-  if (v === 'completed') return 'DONE';
-  if (v === 'error' || v === 'rejected' || v === 'failed') return 'ERROR';
-  return v ? v.toUpperCase() : 'PROCESSING';
-}
 async function _pollPayingPayouts() {
   try {
-    if (!hgcashPay.isEnabled() && !ghwallet.isEnabled()) return;
+    if (!hgcashPay.isEnabled() && !finpro.isEnabled()) return;
     const since = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const paying = await PendingPayout.find({ status: 'paying', createdAt: { $gte: since } })
       .sort({ createdAt: -1 }).limit(25).lean();
     for (const p of paying) {
-      if (p.paidVia === 'ghwallet') { // #332
-        if (!p.gwPayoutId || !ghwallet.isEnabled()) continue;
-        try {
-          const st = await ghwallet.getPayout(p.gwPayoutId);
-          if (st.ok && st.status) {
-            await handlePayoutStatusWebhook({ externalID: p.id, id: p.gwPayoutId, status: _ghwalletPayoutStatusToHg(st.status), errorCode: st.payoutError }, 'ghwallet');
-          }
-        } catch (_) {}
-        continue;
-      }
+      if (p.paidVia === 'ghwallet') continue; // histórico: ya no se opera (#368)
       if (!p.hgTransactionId || !hgcashPay.isEnabled()) continue;
       try {
         const st = await hgcashPay.getTransactionStatus(p.hgTransactionId);
@@ -23086,48 +22938,6 @@ async function _pollPayingPayouts() {
 }
 setTimeout(function () { _pollPayingPayouts(); }, 90 * 1000);
 setInterval(function () { _pollPayingPayouts(); }, 45 * 1000);
-
-// #337: red de seguridad para cobros de GH Wallet que quedaron 'held' (en verificación)
-// porque el payment.verified no llegó o llegó antes que el paid: cada 5 min se consulta
-// el estado real en GH (GET /payments/{id}) y, si ya está verificado, se pasa a 'done'
-// y se matchea. Solo movimientos de las últimas 24 h con más de 5 min en espera.
-async function _pollHeldGhwalletPayments() {
-  try {
-    if (!ghwallet.isEnabled()) return;
-    const gw = await getGhwalletConfig();
-    if (!gw.enabled) return;
-    const held = await BankMovement.find({
-      provider: 'ghwallet', direction: 'Inbound', status: 'held', matchStatus: 'pending',
-      createdAt: { $gte: new Date(Date.now() - 24 * 3600 * 1000), $lte: new Date(Date.now() - 5 * 60 * 1000) }
-    }).sort({ createdAt: -1 }).limit(20).lean();
-    for (const m of held) {
-      const id = String(m.movementId || '').replace(/^gw:/, '');
-      if (!id) continue;
-      const r = await ghwallet.getPayment(id);
-      if (!r.ok || !r.data) continue;
-      const d = r.data;
-      const vs = String(d.verify_state || d.verification_state || '').toLowerCase();
-      const st = String(d.status || d.estado || '').toLowerCase();
-      if (st === 'reversed' || st === 'revertido' || vs === 'reversed') {
-        await BankMovement.updateOne({ movementId: m.movementId }, { $set: { status: 'reversed', matchStatus: 'ignored', chargeError: 'reversed por GH Wallet (consulta)' }, $addToSet: { processedEvents: 'poll.reversed' } });
-        continue;
-      }
-      const verified = vs === 'verified' || vs === 'verificado' || st === 'verified' || st === 'verificado' || d.verified === true || d.verified_at;
-      if (!verified) continue;
-      const upd = await BankMovement.findOneAndUpdate(
-        { movementId: m.movementId, status: 'held' },
-        { $set: { status: 'done', eventType: 'payment.verified', topic: 'poll.verified' }, $addToSet: { processedEvents: 'poll.verified' } },
-        { new: true }
-      ).lean();
-      if (!upd) continue;
-      logger.info(`[ghwallet] cobro ${id} verificado por consulta (el webhook no lo había marcado) — se matchea`);
-      _emitHgcashUpdate('movimiento');
-      hgcashMatchFromMovement(upd).catch(() => {});
-    }
-  } catch (e) { logger.warn(`[ghwallet] poll de cobros held falló: ${e.message}`); }
-}
-setTimeout(function () { _pollHeldGhwalletPayments(); }, 90 * 1000);
-setInterval(function () { _pollHeldGhwalletPayments(); }, 5 * 60 * 1000);
 
 // ============================================================
 // BARRIDO DE COMPROBANTES COLGADOS (owner 2026-08-26)
