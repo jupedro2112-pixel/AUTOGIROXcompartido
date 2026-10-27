@@ -8,6 +8,17 @@
 
 ## Sesión 2026-10-27
 
+### 371. Widget del casino: la PRIMERA apertura abre todo; después se respeta el alto que dejó el cliente — SW v212 / ui.js?v=371
+- **Owner:** "dejalo que solo la primera vez aparezca abierto todo, ya después que guarde lo que
+  tenía guardado". Revierte el criterio del #367 (celular sin memoria entre aperturas).
+- **Ahora (`ui.js`, idéntico en los dos repos):** `_drawerFirstOpen()` en `openCasinoChat`: si el
+  dispositivo nunca abrió el widget (marca `localStorage vip_widget_opened`), borra cualquier
+  `vip_widget_h` viejo y la apertura sale al máximo (default del celular, #365). Desde ahí
+  el alto que deja el cliente (agarre o ⤡) se guarda en `vip_widget_h` y se respeta en cada
+  apertura, en celular y escritorio por igual (como el #300). Doble toque en el agarre = default.
+  ⚠️ Tras el deploy TODOS ven la primera apertura al máximo una vez (la marca no existía), aunque
+  tuvieran un alto guardado. `node --check` OK; solo front → redeploy del zip.
+
 ### 370. Finpro — CARGAS sin webhook: verificación por comprobante (`verify/incoming`) + re-verificación cada 2 min
 - Finpro (hoy) NO avisa las transferencias entrantes; las docs de Webhooks y "Listado para
   conciliación" las manda el owner después. Mientras tanto la carga nace del COMPROBANTE:

@@ -2089,21 +2089,25 @@ VIP.ui._drawerDefaultH = function() {
   if (VIP.ui._isPhoneScreen()) return VIP.ui._drawerMaxH();
   return Math.min(600, Math.round(window.innerHeight * 0.72));
 };
-// #367 (owner 2026-10-27): en CELULAR el alto elegido (agarre o ⤡) vive solo en
-// memoria mientras el panel está abierto (`_drawerSessionH`): cada apertura
-// vuelve a abrir BIEN ABIERTO. Antes se guardaba en localStorage y un achique
-// de una vez dejaba el panel chico para siempre ("no abre al máximo"). En
-// escritorio sigue persistiendo (`vip_widget_h`).
+// #371 (owner 2026-10-27): la PRIMERA apertura en el dispositivo abre BIEN
+// ABIERTO (se descarta cualquier alto guardado antes, marca `vip_widget_opened`);
+// desde ahí el alto que el cliente deja (agarre o ⤡) se guarda en
+// `vip_widget_h` y se respeta en cada apertura, como en el #300.
 VIP.ui._drawerSavedH = function() {
-  if (VIP.ui._isPhoneScreen()) return VIP.ui._drawerSessionH || 0;
   let h = 0;
   try { h = parseInt(localStorage.getItem('vip_widget_h') || '0', 10) || 0; } catch (e) {}
   return h > 0 ? h : 0;
 };
 VIP.ui._drawerRememberH = function(h) {
   h = Math.round(h) || 0;
-  if (VIP.ui._isPhoneScreen()) { VIP.ui._drawerSessionH = h; return; }
   try { if (h > 0) localStorage.setItem('vip_widget_h', String(h)); else localStorage.removeItem('vip_widget_h'); } catch (e) {}
+};
+VIP.ui._drawerFirstOpen = function() {
+  try {
+    if (localStorage.getItem('vip_widget_opened')) return;
+    localStorage.setItem('vip_widget_opened', '1');
+    localStorage.removeItem('vip_widget_h');
+  } catch (e) {}
 };
 VIP.ui._applyDrawerHeight = function(drawer) {
   if (!drawer) return;
@@ -2216,6 +2220,7 @@ VIP.ui.openCasinoChat = function() {
   if (!drawer) return;
   drawer.style.display = 'flex';
   VIP.ui._initDrawerResize(drawer); // #300
+  VIP.ui._drawerFirstOpen(); // #371: la primera vez, todo abierto
   VIP.ui._applyDrawerHeight(drawer); // #365: alto según el celular
   VIP.ui._showDrawerResizeHintOnce();
   // Anclar el panel al MISMO CUADRANTE que la burbuja (lado izq/der + mitad
@@ -2257,7 +2262,6 @@ VIP.ui.closeCasinoChat = function() {
   if (VIP.ui._casinoChatPh) VIP.ui._casinoChatRestoreNodes();
   const drawer = document.getElementById('casinoChatDrawer');
   if (drawer) drawer.style.display = 'none';
-  VIP.ui._drawerSessionH = 0; // #367: en celular la próxima apertura vuelve al máximo
   // La burbuja vuelve a aparecer (se ocultó al abrir el panel).
   const bubble = document.getElementById('casinoSupportBubble');
   if (bubble) bubble.style.visibility = 'visible';
