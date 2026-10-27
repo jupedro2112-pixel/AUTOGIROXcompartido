@@ -8,6 +8,20 @@
 
 ## Sesión 2026-10-27
 
+### 366. Widget del casino: ✕ ROJA bien visible + "🎰 Cerrar y jugar" en el pie — SW v210 / ui.js?v=366
+- **Owner:** "que aparezca la X para cerrar el chat y ver el casino de fondo, sino la gente ve el
+  chat ilimitadamente". Con el panel a pantalla completa (#365) la ✕ translúcida de 28px del
+  header pasaba desapercibida y el cliente no encontraba cómo volver al juego.
+- **Front (`ui.js`, idéntico en AUTOGIROXcompartido y PAUTANUEVAsantino):** la ✕ del header
+  (`#casinoCloseBtn`) pasa a roja sólida, 32px, borde blanco y sombra, title "Cerrar y ver el
+  casino" (mismo `toggleCasinoChat`, que además vuelve a mostrar la burbuja). En el pie del widget
+  (asistente y soporte, `cwFoot` ahora con `flex-wrap`) se suma **"🎰 Cerrar y jugar"** en rojo. La
+  pista de una vez (#365) ahora también dice "Con la ✕ roja lo cerrás y ves el casino" (quien ya
+  la vio no la vuelve a ver: la marca `vip_widget_resize_hint` es la misma).
+- `node --check` OK. Solo front → redeploy del zip. PROBAR: abrir el casino en el celular → ✕ roja
+  arriba a la derecha y "Cerrar y jugar" abajo; cualquiera de los dos cierra el panel, se ve el
+  casino y vuelve la burbuja "⚡ CARGA AUTOMÁTICA" para reabrirlo.
+
 ### 365. Widget del casino adaptado a cada celular: abre BIEN ABIERTO, agarre que avisa + botón ⤢, y el recuadro ALIAS desaparece si no hay alias cargado — SW v209 / ui.js?v=365
 - **Owner (captura de iPhone 410×762):** el panel "Cargas Automáticas" abría a media pantalla y la
   tarjeta del CBU quedaba cortada (había que scrollear para ver el mínimo y los botones); nadie

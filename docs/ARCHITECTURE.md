@@ -6,7 +6,8 @@
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
 > Última actualización: **2026-10-27** — widget del casino adaptado a cada celular (alto/ancho
-> por dispositivo, agarre con texto + botón ⤢, ALIAS solo si está cargado; §6 PWA, WORKLOG #365).
+> por dispositivo, agarre con texto + botón ⤢, ALIAS solo si está cargado, ✕ roja + "Cerrar y jugar";
+> §6 PWA, WORKLOG #365–#366).
 > Antes (2026-10-26): réplica de PICA ROJA (4 tandas): interruptores de
 > funciones (`featureFlags`, `Config['features']`, todo OFF), registro `open|invite`, sistema de
 > notificaciones anterior gateado por `legacyNotifs`, Alertas de estafa, Datos IA, Historias, Centro de
@@ -1070,6 +1071,8 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   del casino (99999): avisos dentro del casino van como elementos del overlay, no `showToast`.
   La tarjeta del CBU (`casinoBotGo('deposit')`) muestra el recuadro ALIAS **solo si hay alias
   cargado** (`_cbuAliasOf`; `#botCbuAliasBox` se oculta en `doRefresh`).
+  Cierre SIEMPRE a mano (#366): ✕ roja del header (`#casinoCloseBtn`) y "🎰 Cerrar y jugar" en el
+  pie, ambos `toggleCasinoChat()` (oculta el panel y vuelve a mostrar la burbuja).
 - Duplicados front/back a mantener sincronizados: mínimo retiro $4.999, bono $5.000,
   `VIP.config.PLATFORM_URL` = `https://1girox.com` (respaldo del SSO; también aparece
   hardcodeada en los mensajes `/sys_deposit*`, `/sys_bonus` y `/sys_welcome` sembrados
