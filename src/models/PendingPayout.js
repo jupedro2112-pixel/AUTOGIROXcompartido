@@ -37,7 +37,12 @@ const pendingPayoutSchema = new mongoose.Schema({
   hgTxId: { type: String, default: null },                       // id de la TRANSACCIÓN real (ledger) → para el comprobante PDF
   receiptSentAt: { type: Date, default: null },                  // cuándo se le envió el comprobante PDF al cliente (idempotencia)
   hgStatus: { type: String, default: null },                     // PENDING/PROCESSING/DONE/ERROR...
-  gwPayoutId: { type: String, default: null, index: true },      // #332: id del retiro en GH Wallet (paidVia 'ghwallet')
+  gwPayoutId: { type: String, default: null, index: true },      // #332: id del retiro en GH Wallet (HISTÓRICO: GH Wallet se quitó en #368; solo lectura)
+  // #368 Finpro (paidVia 'finpro'): un payout = un proceso (`process_id` uuid) con una transferencia.
+  fpProcessId: { type: String, default: null, index: true },     // process_id del lote en Finpro (se reusa SOLO si fpAccepted)
+  fpTransactionId: { type: String, default: null },              // transaction_id (≤ 11 chars, determinístico del payout.id)
+  fpCoelsaId: { type: String, default: null, index: true },      // coelsa_id del resultado = "número de comprobante" para el operador
+  fpAccepted: { type: Boolean, default: null },                  // true = Finpro aceptó el lote (0201); false = rechazado; null = sin respuesta / no enviado
   resolvedCbu: { type: String, default: null },                  // CBU/CVU 22 díg. usado para pagar
   lookupName: { type: String, default: null },                   // titular real del CBU (alias-lookup)
 
@@ -47,7 +52,7 @@ const pendingPayoutSchema = new mongoose.Schema({
   error: { type: String, default: null },
   // Motivo del rechazo que el agente le explica al cliente (owner 2026-08-22).
   rejectReason: { type: String, default: null },
-  // Forma de pago: 'hgcash' (automático) | 'other_bank' (pagado manual por otro banco)
+  // Forma de pago: 'hgcash' | 'finpro' (automáticos) | 'other_bank' (manual por otro banco) | 'ghwallet' (histórico)
   paidVia: { type: String, default: null },
   // Si al rechazar se le devolvieron las fichas al cliente (re-crédito en JUGAYGANA)
   chipsReturned: { type: Boolean, default: false },
