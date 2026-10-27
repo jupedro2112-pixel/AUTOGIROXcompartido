@@ -1706,9 +1706,13 @@ VIP.ui._showCasinoFrame = function() {
         // #300: AGARRE para agrandar/achicar el widget (arrastrar arriba = más
         // alto, abajo = más bajo; doble toque = tamaño original). Vive arriba
         // del header; touch-action:none para que el dedo no scrollee la página.
-        '<div id="casinoDrawerGrip" title="Arrastrá para agrandar o achicar" style="flex:0 0 auto;height:16px;display:flex;align-items:center;justify-content:center;' +
+        // #365: el agarre DICE lo que hace (antes era una rayita muda que nadie
+        // descubría) y es más alto para que el dedo lo agarre fácil.
+        '<div id="casinoDrawerGrip" title="Arrastrá para agrandar o achicar" style="flex:0 0 auto;height:22px;display:flex;align-items:center;justify-content:center;gap:8px;' +
         'background:linear-gradient(135deg,#128c4a,#0f7a3d);cursor:ns-resize;touch-action:none;user-select:none;-webkit-user-select:none;">' +
-        '<div style="width:44px;height:5px;border-radius:3px;background:rgba(255,255,255,0.55);"></div></div>' +
+        '<div style="width:34px;height:5px;border-radius:3px;background:rgba(255,255,255,0.6);"></div>' +
+        '<span style="font-size:9.5px;font-weight:800;color:rgba(255,255,255,0.9);letter-spacing:0.2px;white-space:nowrap;">↕ Arrastrá para agrandar o achicar</span>' +
+        '<div style="width:34px;height:5px;border-radius:3px;background:rgba(255,255,255,0.6);"></div></div>' +
         // Header verde con "EN LÍNEA" + cerrar.
         '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px 10px;flex:0 0 auto;' +
         'background:linear-gradient(135deg,#128c4a,#0f7a3d);">' +
@@ -1724,6 +1728,10 @@ VIP.ui._showCasinoFrame = function() {
             '<div style="color:#c9f5d8;font-size:11px;display:flex;align-items:center;gap:5px;">' +
               '<span style="width:7px;height:7px;border-radius:50%;background:#7dffa8;box-shadow:0 0 6px #7dffa8;"></span>EN LÍNEA</div>' +
           '</div>' +
+          // #365: agrandar/achicar con UN toque (además del agarre de arriba).
+          '<button type="button" id="casinoSizeBtn" onclick="VIP.ui.casinoToggleSize()" title="Agrandar / achicar el panel" ' +
+            'style="background:rgba(255,255,255,0.18);color:#fff;border:none;border-radius:50%;' +
+            'width:28px;height:28px;font-size:14px;cursor:pointer;flex:0 0 auto;">⤢</button>' +
           // Toggle claro/oscuro: el MISMO modo que el chat de soporte (wa-dark).
           '<button type="button" id="casinoThemeBtn" onclick="VIP.ui.casinoToggleTheme()" title="Modo claro/oscuro" ' +
             'style="background:rgba(255,255,255,0.18);color:#fff;border:none;border-radius:50%;' +
@@ -2048,24 +2056,119 @@ VIP.ui._showBubbleDragHintOnce = function() {
 
 /** Abre el panel en modo asistente (o como estaba si el soporte quedó activo). */
 // #300: redimensionar el widget arrastrando el agarre de arriba. Alto guardado
-// en localStorage (vip_widget_h) y re-aplicado al abrir. Límites: 260px …
-// alto de la pantalla − 40px. Doble toque en el agarre = volver al default.
-VIP.ui._drawerMaxH = function() { return Math.max(260, window.innerHeight - 40); };
-VIP.ui._applyDrawerHeight = function(drawer) {
+// en localStorage (vip_widget_h) y re-aplicado al abrir. Doble toque en el
+// agarre = volver al default.
+// #365 (owner 2026-10-27): el panel se ADAPTA a cada celular. En pantallas de
+// teléfono (≤ 640px de ancho) abre BIEN ABIERTO (todo el alto disponible, a lo
+// ancho) salvo que el cliente lo haya achicado él; en escritorio sigue el
+// tamaño de siempre (600px / 72% del alto). El tope respeta el notch y la barra
+// de inicio del iPhone (padding safe-area del overlay) y se recalcula en cada
+// resize/rotación (teclado abierto → se achica, cerrado → vuelve).
+VIP.ui._isPhoneScreen = function() { return window.innerWidth <= 640; };
+VIP.ui._drawerInsets = function() {
+  const ov = document.getElementById('casinoOverlay');
+  let top = 0, bottom = 0;
+  if (ov) {
+    try { const cs = getComputedStyle(ov); top = parseFloat(cs.paddingTop) || 0; bottom = parseFloat(cs.paddingBottom) || 0; } catch (e) {}
+  }
+  return { top: top, bottom: bottom };
+};
+VIP.ui._drawerMaxH = function() {
+  const i = VIP.ui._drawerInsets();
+  // 16px de aire arriba y abajo (el panel está anclado a 16px del borde).
+  return Math.max(260, window.innerHeight - i.top - i.bottom - 32);
+};
+VIP.ui._drawerDefaultH = function() {
+  if (VIP.ui._isPhoneScreen()) return VIP.ui._drawerMaxH();
+  return Math.min(600, Math.round(window.innerHeight * 0.72));
+};
+VIP.ui._drawerSavedH = function() {
   let h = 0;
   try { h = parseInt(localStorage.getItem('vip_widget_h') || '0', 10) || 0; } catch (e) {}
-  if (h > 0) drawer.style.height = Math.min(VIP.ui._drawerMaxH(), Math.max(260, h)) + 'px';
+  return h > 0 ? h : 0;
+};
+VIP.ui._applyDrawerHeight = function(drawer) {
+  if (!drawer) return;
+  const h = VIP.ui._drawerSavedH() || VIP.ui._drawerDefaultH();
+  drawer.style.height = Math.min(VIP.ui._drawerMaxH(), Math.max(260, h)) + 'px';
+  // En celular el panel va de lado a lado (16px de margen); en escritorio
+  // conserva el ancho fijo del inline (380px).
+  drawer.style.width = VIP.ui._isPhoneScreen() ? 'calc(100vw - 32px)' : '';
+  VIP.ui._syncDrawerSizeBtn(drawer);
+};
+/** Ícono del botón ⤢/⤡ según si el panel ya está al máximo. */
+VIP.ui._syncDrawerSizeBtn = function(drawer) {
+  const b = document.getElementById('casinoSizeBtn');
+  drawer = drawer || document.getElementById('casinoChatDrawer');
+  if (!b || !drawer) return;
+  const atMax = drawer.offsetHeight >= VIP.ui._drawerMaxH() - 8;
+  b.textContent = atMax ? '⤡' : '⤢';
+  b.title = atMax ? 'Achicar el panel' : 'Agrandar el panel';
+};
+/** Botón ⤢ del header: alterna entre panel COMPLETO y tamaño normal (en
+ *  celular "normal" = la mitad de la pantalla, para ver el juego atrás). */
+VIP.ui.casinoToggleSize = function() {
+  const drawer = document.getElementById('casinoChatDrawer');
+  if (!drawer) return;
+  const maxH = VIP.ui._drawerMaxH();
+  const atMax = drawer.offsetHeight >= maxH - 8;
+  let h;
+  if (atMax) h = VIP.ui._isPhoneScreen() ? Math.max(260, Math.round(maxH * 0.55)) : Math.min(600, Math.round(window.innerHeight * 0.72));
+  else h = maxH;
+  h = Math.min(maxH, Math.max(260, h));
+  drawer.style.height = h + 'px';
+  try { localStorage.setItem('vip_widget_h', String(h)); } catch (e) {}
+  VIP.ui._syncDrawerSizeBtn(drawer);
+};
+/** Pista (una vez por dispositivo) de que el panel se agranda y se achica.
+ *  Va DENTRO del overlay del casino, pegada al agarre: el toast global queda
+ *  tapado por el overlay (z-index 26000 vs 99999). Mismo patrón que la pista
+ *  de arrastre de la burbuja. */
+VIP.ui._showDrawerResizeHintOnce = function() {
+  try {
+    if (localStorage.getItem('vip_widget_resize_hint')) return;
+    localStorage.setItem('vip_widget_resize_hint', '1');
+  } catch (e) { return; }
+  setTimeout(function() {
+    const overlay = document.getElementById('casinoOverlay');
+    const drawer = document.getElementById('casinoChatDrawer');
+    if (!overlay || !drawer || drawer.style.display === 'none') return;
+    const r = drawer.getBoundingClientRect();
+    const hint = document.createElement('div');
+    hint.textContent = '↕ Podés agrandar o achicar este panel: arrastrá la barrita verde de arriba o tocá ⤢';
+    hint.style.cssText =
+      'position:absolute;max-width:260px;background:rgba(13,13,26,0.95);color:#ffd700;' +
+      'border:1px solid rgba(212,175,55,0.6);border-radius:12px;padding:9px 12px;' +
+      'font-size:12px;font-weight:700;line-height:1.35;z-index:8;text-align:center;' +
+      'box-shadow:0 8px 30px rgba(0,0,0,0.6);transition:opacity 0.6s;cursor:pointer;';
+    // Centrada sobre el panel, justo debajo del agarre.
+    hint.style.left = Math.max(8, Math.round(r.left + r.width / 2 - 130)) + 'px';
+    hint.style.top = Math.round(r.top + 30) + 'px';
+    hint.onclick = function() { try { hint.remove(); } catch (e) {} };
+    overlay.appendChild(hint);
+    setTimeout(function() { hint.style.opacity = '0'; }, 6000);
+    setTimeout(function() { try { hint.remove(); } catch (e) {} }, 6800);
+  }, 700);
 };
 VIP.ui._initDrawerResize = function(drawer) {
   const grip = document.getElementById('casinoDrawerGrip');
   if (!grip || grip.dataset.rs) return;
   grip.dataset.rs = '1';
+  // #365: con el panel abierto, cada cambio de viewport (teclado, rotación,
+  // barra del navegador) re-aplica el alto para que nunca quede cortado.
+  const onViewport = function() {
+    if (drawer.style.display === 'none' || !drawer.style.display) return;
+    VIP.ui._applyDrawerHeight(drawer);
+  };
+  window.addEventListener('resize', onViewport);
+  window.addEventListener('orientationchange', function() { setTimeout(onViewport, 200); });
   let startY = 0, startH = 0, active = false;
   const onMove = function(e) {
     if (!active) return;
     const y = e.clientY != null ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : startY);
     const h = Math.min(VIP.ui._drawerMaxH(), Math.max(260, startH + (startY - y)));
     drawer.style.height = h + 'px';
+    VIP.ui._syncDrawerSizeBtn(drawer);
     if (e.cancelable) e.preventDefault();
   };
   const onEnd = function() {
@@ -2085,8 +2188,8 @@ VIP.ui._initDrawerResize = function(drawer) {
     if (e.cancelable) e.preventDefault();
   });
   grip.addEventListener('dblclick', function() {
-    drawer.style.height = '';
     try { localStorage.removeItem('vip_widget_h'); } catch (e) {}
+    VIP.ui._applyDrawerHeight(drawer);
   });
 };
 
@@ -2095,7 +2198,8 @@ VIP.ui.openCasinoChat = function() {
   if (!drawer) return;
   drawer.style.display = 'flex';
   VIP.ui._initDrawerResize(drawer); // #300
-  VIP.ui._applyDrawerHeight(drawer);
+  VIP.ui._applyDrawerHeight(drawer); // #365: alto según el celular
+  VIP.ui._showDrawerResizeHintOnce();
   // Anclar el panel al MISMO CUADRANTE que la burbuja (lado izq/der + mitad
   // arriba/abajo) para que abra "desde" donde está, y OCULTAR la burbuja mientras
   // el panel está abierto → el chat nunca la tapa (se cierra con la ✕). Se lee el
@@ -2610,7 +2714,10 @@ VIP.ui.casinoBotGo = function(state) {
     }
     const doRefresh = function(c, node) {
       const n = node.querySelector('#botCbuNumber'); if (n) n.textContent = c.number || '—';
-      const a = node.querySelector('#botCbuAlias'); if (a) a.textContent = c.alias || '—';
+      // #365: sin alias cargado → el recuadro ALIAS desaparece (queda solo CBU).
+      const av = VIP.ui._cbuAliasOf(c);
+      const a = node.querySelector('#botCbuAlias'); if (a) a.textContent = av || '—';
+      const ab = node.querySelector('#botCbuAliasBox'); if (ab) ab.style.display = av ? '' : 'none';
       const t = node.querySelector('#botCbuTitular'); if (t) t.textContent = c.titular || c.bank || '—';
     };
     // Si la tarjeta ya existe Y sigue siendo lo ÚLTIMO del chat → solo refrescar.
@@ -2651,7 +2758,7 @@ VIP.ui.casinoBotGo = function(state) {
               '<div style="display:flex;gap:6px;align-items:center;">' +
               '<b id="botCbuNumber" class="cwVal" style="flex:1;word-break:break-all;font-size:13px;"></b>' +
               '<button type="button" onclick="VIP.ui.casinoBotCopy(\'number\')" style="background:#128c4a;color:#fff;border:none;border-radius:8px;padding:7px 11px;font-size:11.5px;font-weight:800;cursor:pointer;flex:0 0 auto;">Copiar CBU</button></div></div>' +
-            '<div class="cwBox" style="border-radius:9px;padding:8px 10px;">' +
+            '<div class="cwBox" id="botCbuAliasBox" style="border-radius:9px;padding:8px 10px;">' +
               '<div class="cwLbl" style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;">ALIAS</div>' +
               '<div style="display:flex;gap:6px;align-items:center;">' +
               '<b id="botCbuAlias" class="cwVal" style="flex:1;word-break:break-all;font-size:13px;"></b>' +
@@ -2661,10 +2768,8 @@ VIP.ui.casinoBotGo = function(state) {
               '<b id="botCbuTitular" class="cwVal" style="font-size:13px;"></b></div>' +
             '<div class="cwWarn" style="border-radius:8px;padding:7px 9px;font-size:12px;font-weight:700;text-align:center;">Depósito mínimo: $2.000</div>' +
           '</div>';
-        const c = VIP.ui._botCbu;
-        card.querySelector('#botCbuNumber').textContent = c.number || '—';
-        card.querySelector('#botCbuAlias').textContent = c.alias || '—';
-        card.querySelector('#botCbuTitular').textContent = c.titular || c.bank || '—';
+        const c = VIP.ui._botCbu || {};
+        doRefresh(c, card); // #365: CBU + titular; ALIAS solo si está cargado
         VIP.ui._botRow(
           VIP.ui._botBtn('✅ Ya hice la transferencia', "VIP.ui.casinoBotGo('receipt')", true) +
           VIP.ui._botBtn('↩ Volver', "VIP.ui.casinoBotGo('home')")
@@ -2800,9 +2905,14 @@ VIP.ui.casinoBotGo = function(state) {
 };
 
 /** Copiar CBU/alias al portapapeles (con fallback para navegadores viejos). */
+/** #365: alias "cargado" = texto real (vacío, '-', '—' o espacios = no hay). */
+VIP.ui._cbuAliasOf = function(c) {
+  const a = String((c && c.alias) || '').trim();
+  return /^[-—–_.\s]*$/.test(a) ? '' : a;
+};
 VIP.ui.casinoBotCopy = function(kind) {
   const c = VIP.ui._botCbu || {};
-  const val = kind === 'alias' ? c.alias : c.number;
+  const val = kind === 'alias' ? VIP.ui._cbuAliasOf(c) : c.number;
   if (!val) return;
   const ok = function() { VIP.ui.showToast('✅ Copiado: ' + val, 'success'); };
   try {

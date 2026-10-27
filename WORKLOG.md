@@ -4,7 +4,47 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-26**
+> **Última actualización: 2026-10-27**
+
+## Sesión 2026-10-27
+
+### 365. Widget del casino adaptado a cada celular: abre BIEN ABIERTO, agarre que avisa + botón ⤢, y el recuadro ALIAS desaparece si no hay alias cargado — SW v209 / ui.js?v=365
+- **Owner (captura de iPhone 410×762):** el panel "Cargas Automáticas" abría a media pantalla y la
+  tarjeta del CBU quedaba cortada (había que scrollear para ver el mínimo y los botones); nadie
+  descubría que se puede agrandar/achicar (la rayita del agarre no dice nada); y con el alias sin
+  cargar en el panel aparecía un recuadro "ALIAS —" con botón "Copiar Alias" inútil. Pidió lo mismo
+  en AUTOGIROXcompartido y PAUTANUEVAsantino (cambio idéntico en los dos, `public/js/ui.js`).
+- **Alto/ancho adaptable (`_applyDrawerHeight`, ui.js):** en pantallas de teléfono
+  (`_isPhoneScreen` = ancho ≤ 640px) el panel abre con TODO el alto disponible y de lado a lado
+  (16px de margen), salvo que el cliente lo haya achicado él (`localStorage vip_widget_h` se
+  respeta). En escritorio sigue el tamaño de siempre (600px / 72% del alto, ancho 380px).
+  `_drawerMaxH` = alto de la ventana − 32px − safe-area del iPhone (se lee el padding real del
+  overlay, `_drawerInsets`): con notch y barra de inicio el panel ya no se sale de la pantalla.
+  Con el panel abierto, cada `resize`/`orientationchange` re-aplica el alto (teclado abierto en
+  el chat de soporte → se achica; cerrado → vuelve). Doble toque en el agarre = volver al default
+  REAL del dispositivo (antes borraba el alto y quedaba el inline de escritorio).
+- **Que se note que se agranda/achica:** el agarre verde de arriba pasó de 16 a 22px y dice
+  "↕ Arrastrá para agrandar o achicar" entre dos rayitas; botón nuevo **⤢ / ⤡** en el header
+  (`casinoSizeBtn` → `VIP.ui.casinoToggleSize()`): un toque alterna panel completo ↔ tamaño
+  normal (en celular "normal" = 55% del alto, para ver el juego atrás; en escritorio 600px/72%);
+  el ícono se sincroniza mientras se arrastra (`_syncDrawerSizeBtn`). Pista UNA vez por
+  dispositivo al abrir (`localStorage vip_widget_resize_hint`, `_showDrawerResizeHintOnce`):
+  globito dorado DENTRO del overlay del casino, debajo del agarre, 6 s o un toque. ⚠️ Va en el
+  overlay a propósito: el toast global (`.toast`, z-index 26000) queda TAPADO por el overlay del
+  casino (z-index 99999) — por eso tampoco se ve el "✅ Copiado" de Copiar CBU; pendiente aparte.
+- **ALIAS solo si está cargado:** `VIP.ui._cbuAliasOf(c)` = alias con texto real (vacío, `-`, `—`,
+  espacios = no hay). La tarjeta del CBU renderiza el recuadro con `id=botCbuAliasBox` y
+  `doRefresh` lo muestra u oculta en cada refresco (si el agente carga el alias después, aparece
+  solo al volver a Depositar). "Copiar Alias" usa el mismo criterio. El mensaje de chat
+  `/sys_cbu` (📱 Alias: {alias}) NO cambia: ese texto se edita desde COMANDOS.
+- **Validado:** `node --check` OK (ui.js, firebase-messaging-sw.js) en los dos repos; el diff de
+  ui.js es byte a byte el mismo en ambos (solo cambia el número de WORKLOG en los comentarios).
+  Sin runtime. Solo front (EB sirve `public/` → redeploy del zip; sin cambios de back).
+  **PROBAR en celular:** abrir el casino → el panel ocupa casi toda la pantalla con el CBU, el
+  mínimo y los botones a la vista, sin scrollear; ver el globito "↕ Podés agrandar o achicar…";
+  tocar ⤢ → se achica a la mitad y el ícono pasa a ⤡; arrastrar el agarre; rotar el teléfono;
+  en el panel admin dejar el alias vacío → la tarjeta muestra solo CBU + TITULAR; cargar un alias →
+  vuelve el recuadro ALIAS con "Copiar Alias".
 
 ## Sesión 2026-10-26
 

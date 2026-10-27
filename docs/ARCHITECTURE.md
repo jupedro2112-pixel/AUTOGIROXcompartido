@@ -5,7 +5,9 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-26** — réplica de PICA ROJA (4 tandas): interruptores de
+> Última actualización: **2026-10-27** — widget del casino adaptado a cada celular (alto/ancho
+> por dispositivo, agarre con texto + botón ⤢, ALIAS solo si está cargado; §6 PWA, WORKLOG #365).
+> Antes (2026-10-26): réplica de PICA ROJA (4 tandas): interruptores de
 > funciones (`featureFlags`, `Config['features']`, todo OFF), registro `open|invite`, sistema de
 > notificaciones anterior gateado por `legacyNotifs`, Alertas de estafa, Datos IA, Historias, Centro de
 > avisos y piloto automático (§7, §10–§10.3; WORKLOG #360–#363).
@@ -1055,6 +1057,19 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 - **Botón CASINO** (`#plataformaBtn` → `VIP.ui.enterCasino()`): login único contra
   1girox. Ver la trampa del pop-up blocker en §4.9. El modal de acceso manual sigue
   existiendo, pero **sólo como camino de respaldo** cuando el SSO falla.
+- **Widget "Cargas Automáticas" sobre el casino — tamaño (#300 → #365):** `#casinoChatDrawer` es
+  un panel absoluto dentro de `#casinoOverlay`, anclado al cuadrante de la burbuja. Alto:
+  `_applyDrawerHeight` (ui.js) = `localStorage vip_widget_h` (lo que el cliente dejó) o el default
+  del dispositivo (`_drawerDefaultH`: celular ≤ 640px → TODO el alto disponible y ancho
+  `100vw − 32px`; escritorio → 600px / 72% del alto, 380px de ancho), siempre acotado por
+  `_drawerMaxH` = `innerHeight − 32 − safe-area` (padding real del overlay). Se re-aplica en cada
+  `resize`/`orientationchange` mientras está abierto. Se cambia arrastrando el agarre de arriba
+  (`#casinoDrawerGrip`, con texto "↕ Arrastrá…"; doble toque = default) o con el botón ⤢/⤡ del
+  header (`casinoToggleSize`). Pista una vez por dispositivo (`vip_widget_resize_hint`) como
+  globito en el overlay. ⚠️ El toast global (`.toast`, z-index 26000) queda TAPADO por el overlay
+  del casino (99999): avisos dentro del casino van como elementos del overlay, no `showToast`.
+  La tarjeta del CBU (`casinoBotGo('deposit')`) muestra el recuadro ALIAS **solo si hay alias
+  cargado** (`_cbuAliasOf`; `#botCbuAliasBox` se oculta en `doRefresh`).
 - Duplicados front/back a mantener sincronizados: mínimo retiro $4.999, bono $5.000,
   `VIP.config.PLATFORM_URL` = `https://1girox.com` (respaldo del SSO; también aparece
   hardcodeada en los mensajes `/sys_deposit*`, `/sys_bonus` y `/sys_welcome` sembrados
