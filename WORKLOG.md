@@ -8,6 +8,92 @@
 
 ## Sesión 2026-10-27
 
+### 372. Finpro — WEBHOOKS: entrantes por aviso firmado (secundario) + resultado de retiros por payload firmado (principal) — admin-sw v103
+- **Doc oficial** (app.finpro.com.ar/docs → Webhooks, transcripción del owner): dos webhooks.
+  **Principal** = resultado de las transferencias SALIENTES iniciadas por API, llega a la
+  `callback_url` de cada `transfers/cvu` (ya la mandábamos → `POST /api/finpro/callback`).
+  **Secundario** = eventos bancarios de nuestros CVUs (entrantes y salientes) → **`POST
+  /api/finpro/webhook`** (nuevo). Según las slides "Cómo funciona": las credenciales son de un
+  **Cliente API** (una API Key + Secret + UNA config de webhooks) que agrupa **1..N cuentas/CVUs**;
+  Finpro configura DOS URLs por Cliente API (una para ENTRANTES y otra para SALIENTES) → se le da
+  la MISMA URL para las dos y la ruta despacha por `transfer_type`; el aviso identifica la cuenta
+  por CVU/CBU y por el id interno de la cuenta, y trae los datos tal como figuran en la
+  transferencia (titular, CUIT/CUIL, monto, fecha, concepto). Sin alta de la dirección Finpro no
+  manda el aviso (la transferencia queda en su portal) → entrantes solo por comprobante.
+  Los dos firmados igual: `X-Webhook-Signature` = HMAC-SHA256(`X-Webhook-Timestamp` + "." +
+  body crudo, secreto) en hex; hay que responder `200 {"success":true}` solo con firma válida;
+  Finpro reintenta hasta 3 veces (timeout 10 s, backoff) y puede repetir un evento.
+- **`finproService.verifyWebhookSignature({ rawBody, timestamp, signature, secrets, maxAgeSec })`**
+  (+ `signWebhook(rawBody, secret, ts)` y `getWebhookMaxAgeSec()`): HMAC sobre los BYTES crudos
+  (`req.rawBody`, que el `verify` global de `express.json` ya guardaba para hgcash), `timingSafeEqual`,
+  acepta cualquiera de una lista de secretos, prefijo `sha256=` tolerado. **DECISIÓN (la doc no fija
+  ventana):** el timestamp vale ±300 s (`FINPRO_WEBHOOK_MAX_AGE_SEC`), simétrico; un timestamp en
+  milisegundos se tolera. Test en frío sin node_modules: `node scripts/test-finpro-webhook-signature.js`.
+- **Secreto de firma:** panel (`Config['finproCredentials'].webhookSecretEnc`, cifrado con `_credEncrypt`,
+  `webhookSecretLast4` visible; campo "Secreto de firma de los webhooks" del bloque 🟣, vacío = no
+  cambiar, mínimo 8 chars) > SSM `FINPRO_WEBHOOK_SECRET`. `_finproWebhookSecrets()` devuelve
+  `[panel, ssm]` (los dos valen: durante un cambio no se pierde ningún aviso — distinto de hgcash
+  #351, donde el del panel es exclusivo). UN solo secreto para los dos webhooks (DECISIÓN: la doc del
+  alta habla de "el secreto de firma").
+- **`POST /api/finpro/webhook` (secundario, público, rate-limit 240/min, sin auth):** sin secreto →
+  503 en producción (fail-closed, como hgcash) / se procesa con aviso en dev; firma inválida o
+  timestamp vencido → 401 (`_finproWebhookReject`, contador + motivo en el diag). `webhook_type` ≠
+  'notification' o payload sin `notification_id` ni `coelsa_id` → 200 + log (ignorado). **Dedupe:**
+  (1) `BankMovement.movementId = 'fp:<notification_id>'` único + `processedEvents` incluye
+  `'finpro.webhook'` → repetido, 200 y nada; (2) **por coelsa** dentro de `_finproIngestIncoming`: si
+  ya hay un movimiento Finpro entrante con el mismo `coelsaCode` aunque el id sea otro (el verify del
+  comprobante llegó antes, o al revés) se REUSA ese movimiento (`dedupedByCoelsa:true`) — un coelsa
+  = una acreditación. `transfer_type 'E'` + `cbu_to` ∈ **nuestros CVUs** (`finpro.ourCvus()` =
+  CVU principal + "Otros CVUs nuestros" `extraCvus` del panel / `FINPRO_EXTRA_CVUS`; sin ninguno
+  configurado se acepta cualquiera) → se registra YA, se responde 200, y en segundo plano:
+  titular/CUIT/concepto **del payload si vienen** (`_finproNotificationFromWebhook` lee claves
+  posibles: titular/holder/nombre/origin_name/cbu_from_name, cuit/cuil/document, concepto/
+  concept/referencia/reference/description, account_id/finpro_account_id/id_cuenta → `accountId`)
+  y, solo si no vino el nombre, **titular de origen por Coelsa** (`accounts/information` con `cvu
+  = cbu_from` → `fromName`/`fromCUIT`; cache 24 h por CVU `_finproPayerCache`, fallar no es fatal) →
+  `hgcashMatchFromMovement` (mismos candados, modo sombra/auto de Finpro, reference `vip-hg-<coelsa>`).
+  `transfer_type` distinto de 'E' (o `cbu_from` nuestro) → `BankMovement` **Outbound** `ignored`
+  para el libro/cierre, sin matchear (es la misma ruta la que recibe las notificaciones de
+  salientes). Entrante a un CVU que NO es ninguno de los configurados → registrado `ignored` con
+  `chargeError 'CVU destino distinto del configurado'` + warn (agregarlo en "Otros CVUs nuestros"
+  si es nuestro). Contadores `_finproWebhookStats` (recibidos / aceptados / rechazados /
+  entrantes / salientes / repetidos / ignorados / último evento / última entrante) en el diag.
+- **Comprobante DESPUÉS del webhook:** `hgcashMatchFromComprobante` ya encuentra el movimiento
+  `fp:` pendiente (coelsa / nombre de origen leído por Coelsa). Además `_finproVerifyComprobante`
+  **corta antes de llamar a verify** si el comprobante trae un coelsa que ya está registrado como
+  movimiento Finpro: pendiente → `hgcashAutoCarga` con ese comprobante; ya usado → no se vuelve a
+  cargar; monto distinto → `needs_review` + nota. **Webhook DESPUÉS del verify:** cae en el dedupe
+  por coelsa (no se crea otro movimiento). La verificación por comprobante + cron de 2 min quedan
+  como RESPALDO (webhook caído / sin secreto / aviso tardío).
+- **`POST /api/finpro/callback` (principal) ahora valida la firma:** con secreto configurado y
+  headers de firma presentes pero inválidos → 401 y nada (el poll de 45 s cubre el pago). Con
+  **firma válida y filas en `data[]`** → `_finproApplySignedCallback`: payout por `fpProcessId` =
+  `process_id` o `fpTransactionId` = `transaction_id`; `status 'completed'` + fila con
+  `response_code` que no es de error (`'0200'` = ok, confirma la detección de `_finproSyncPayout`) →
+  `DONE` con `fpCoelsaId`; `'failed'` o código de la tabla → `ERROR` en español + `fpAccepted:false`
+  — todo vía `handlePayoutStatusWebhook(…, 'finpro')`. Sin firma válida (sin secreto, o payload viejo
+  de solo contadores sin headers) → como antes: PISTA + `_finproSyncPayout`. **Nunca se paga ni
+  acredita por un body sin firmar.** Contadores: `signed`, `rejected`, `confirmedFromPayload`.
+- **Panel (🟣 Finpro, admin-sw v103):** campo del secreto; campo "Otros CVUs nuestros" (coma-
+  separados, 22 dígitos c/u, `Config['finproCredentials'].extraCvus`); recuadro "🔗 Direcciones para
+  darle a Finpro" con las dos URLs (`…/api/finpro/webhook` = notificaciones de entrantes Y
+  salientes — la MISMA para las dos; `…/api/finpro/callback` = principal/retiros) y botones copiar;
+  texto del alta (activar el principal — usamos `callback_url` — y configurar entrantes y salientes
+  hacia la misma URL con este secreto; sin alta no hay avisos → solo comprobante); estado
+  de credenciales muestra el secreto (PANEL …last4 / AWS / SIN SECRETO) y "listo para cargas por
+  webhook / por verificación"; diag con los contadores de los dos webhooks + última entrante ingresada
+  + "vino por" (webhook / verify) en la tabla de movimientos. "🏦 Bancos automáticos": recibir por
+  Finpro sin secreto o sin CVU **avisa, no bloquea** (`warnings[]` del POST `/api/admin/banks`;
+  línea de estado "sin secreto de firma (entrantes solo por comprobante)").
+- **Qué pedirle a Finpro para el alta:** (1) activar el webhook PRINCIPAL para nuestro Cliente API
+  (mandamos `callback_url` en cada transferencia); (2) configurar las notificaciones de ENTRANTES y
+  de SALIENTES hacia la misma `https://<dominio>/api/finpro/webhook`; (3) el secreto de firma (el
+  que ellos generen, o el que cargamos en el panel) — el mismo para todo. Después: panel → Finpro →
+  pegar el secreto (+ otros CVUs si el Cliente API tiene varias cuentas) → "Probar y guardar";
+  Bancos automáticos → cargas por Finpro; probar con una transferencia real y mirar el diag
+  (recibidos/aceptados; si cae en "ignorados" por CVU, agregar ese CVU). `node --check` OK en server.js, finproService, admin.js,
+  admin-sw; TDZ revisado a mano. **Back necesita deploy.**
+
 ### 371. Widget del casino: la PRIMERA apertura abre todo; después se respeta el alto que dejó el cliente — SW v212 / ui.js?v=371
 - **Owner:** "dejalo que solo la primera vez aparezca abierto todo, ya después que guarde lo que
   tenía guardado". Revierte el criterio del #367 (celular sin memoria entre aperturas).

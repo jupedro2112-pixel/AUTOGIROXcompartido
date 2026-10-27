@@ -105,13 +105,23 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   usar `hgcashPay.getToken()` y `_hgcashWebhookSecrets()`. **Reenvío a otras páginas (#326):**
   también desde el panel (`Config['hgcashFanout']`, hasta 5 URLs; sin config vale
   `HGCASH_FANOUT_URL`). Un aviso ya reenviado (`X-Forwarded-By`) no se vuelve a reenviar.
-- **Finpro (#368–#370, reemplaza a GH Wallet):** segundo banco, paralelo a hgcash, mismo
-  pipeline. ⚠️ **Sin webhook de entradas (por ahora):** Finpro no avisa cuando entra plata; la
-  carga nace del COMPROBANTE del cliente → `transfers/verify/incoming` (coelsa → monto+fecha) →
-  `_finproIngestIncoming` → `hgcashAutoCarga`. `not_found_yet` se re-consulta cada 2 min hasta
-  90 min (`_finproReverifyTick`); `ambiguous`/confianza media NO carga. verify **no detecta
-  reversiones** → no hay débito automático. Cuando lleguen las docs de Webhooks / Listado,
-  enchufar en `_finproIngestIncoming(notification, source)`. **Retiros:** un pago = UN
+- **Finpro (#368–#372, reemplaza a GH Wallet):** segundo banco, paralelo a hgcash, mismo
+  pipeline. **Entrantes = WEBHOOK primero (#372), verificación por comprobante de RESPALDO:**
+  `POST /api/finpro/webhook` (público) recibe las notificaciones de entrantes Y salientes del
+  Cliente API (1..N CVUs: `finpro.ourCvus()` = CVU principal + "Otros CVUs" del panel /
+  `FINPRO_EXTRA_CVUS`; a Finpro se le da la MISMA URL para las dos), firmadas HMAC-SHA256 (`X-Webhook-Signature`/`X-Webhook-Timestamp`, sobre el body CRUDO →
+  necesita `req.rawBody` del `verify` global de `express.json`: no sacarlo). Secreto de firma:
+  panel (`Config['finproCredentials'].webhookSecretEnc`, bloque 🟣) > SSM `FINPRO_WEBHOOK_SECRET`
+  (`_finproWebhookSecrets()`, los dos valen); sin secreto → 503 en prod y las cargas por Finpro
+  salen solo por el comprobante. Dedupe por `notification_id` (`fp:<id>`) Y por coelsa dentro de
+  `_finproIngestIncoming` (único punto de creación de movimientos Finpro). Titular/CUIT del
+  payload si vienen; si no, `accounts/information` con `cbu_from` (cache 24 h). Sin alta del
+  webhook en Finpro no hay avisos (solo comprobante). Si el aviso no llegó, el
+  COMPROBANTE → `transfers/verify/incoming` (coelsa → monto+fecha) → misma ingesta →
+  `hgcashAutoCarga`; `not_found_yet` se re-consulta cada 2 min hasta 90 min
+  (`_finproReverifyTick`); `ambiguous`/confianza media NO carga. Ningún canal **detecta
+  reversiones** → no hay débito automático. `POST /api/finpro/callback` (principal) confirma
+  los retiros DESDE el payload solo con firma válida; sin firma es pista + consulta. **Retiros:** un pago = UN
   `process_id` (`PendingPayout.fpProcessId`): se reusa solo si el lote fue aceptado
   (`fpAccepted`); tras un timeout NO se reenvía (el poll pregunta); transferencias del mismo
   CVU de a UNA (`finpro.withCvuLock`, error 2454); `transaction_id` ≤ 11 chars. El

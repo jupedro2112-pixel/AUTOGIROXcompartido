@@ -1253,11 +1253,12 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                         </div>
                         <div class="cbu-form" id="finproForm" style="border-left:4px solid #b388ff;">
                             <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 8px;">
-                                Segundo banco con API, independiente de hgcash. Finpro <b>no avisa</b> cuando entra una transferencia: cuando el
-                                cliente manda el comprobante, el sistema le <b>pregunta a Finpro</b> si esa transferencia ya está acreditada (por
-                                código COELSA o por monto + fecha) y, si la confirma, la carga con el <b>mismo matcheo y los mismos candados</b>
-                                que hgcash. Si todavía no acreditó, la vuelve a consultar cada 2 min durante 90 min. Si entra o no por este banco
-                                se elige arriba, en "Bancos automáticos". ⚠️ Finpro no informa reversiones: una transferencia confirmada se da por firme.
+                                Segundo banco con API, independiente de hgcash. Finpro <b>avisa por webhook</b> cada transferencia que entra a nuestro
+                                CVU (firmado con el secreto de abajo) y el sistema la matchea con el comprobante del cliente con el <b>mismo matcheo y
+                                los mismos candados</b> que hgcash. Si el aviso todavía no llegó cuando el cliente manda el comprobante, se le
+                                <b>pregunta a Finpro</b> si esa transferencia ya está acreditada (por código COELSA o por monto + fecha) y, si no, se
+                                vuelve a consultar cada 2 min durante 90 min. Si entra o no por este banco se elige arriba, en "Bancos automáticos".
+                                ⚠️ Finpro no informa reversiones: una transferencia confirmada se da por firme.
                             </p>
                             <div id="finproDevWarn" style="display:none;margin:0 0 10px;padding:8px 10px;border-radius:8px;background:rgba(255,80,80,0.12);border:1px solid rgba(255,80,80,0.5);color:#ff9d9d;font-size:12px;font-weight:700;"></div>
                             <div id="finproStatusLine" style="font-size:12px;margin-bottom:10px;color:#aaa;"></div>
@@ -1279,7 +1280,8 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                                     En Finpro → API: generá la <b>API Key</b> y el <b>API Secret</b> (el Secret se muestra UNA sola vez; si lo regenerás, el anterior
                                     deja de servir). Cargalos acá junto con el <b>número de cuenta</b> interno de Finpro, <b>nuestro CVU</b> (22 dígitos: de ahí salen
                                     los retiros y ahí entran las cargas) y, cuando Finpro te dé la <b>URL de producción</b>, la URL base. Se guardan cifrados y mandan
-                                    sobre AWS (SSM). Antes de guardar se prueba el token y el saldo.
+                                    sobre AWS (SSM). Antes de guardar se prueba el token y el saldo. El <b>secreto de firma de los webhooks</b> es el que se
+                                    acuerda con Finpro en el alta (lo genera la plataforma o lo definís vos): con él se valida que cada aviso sea de Finpro.
                                 </p>
                                 <div id="finproCredStatus" style="font-size:12px;color:#ccc;margin-bottom:10px;line-height:1.6;">Cargando…</div>
                                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -1304,8 +1306,14 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                                 </div>
                                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
                                     <div class="form-group" style="flex:1;min-width:220px;">
-                                        <label>Nuestro CVU (22 dígitos):</label>
+                                        <label>Nuestro CVU principal (22 dígitos):</label>
                                         <input type="text" id="finproCredFromCvu" maxlength="22" inputmode="numeric" placeholder="0000000000000000000000" autocomplete="off" style="width:100%;">
+                                        <small style="color:#aaa;font-size:11px;">De acá salen los retiros y es el que les damos a los clientes.</small>
+                                    </div>
+                                    <div class="form-group" style="flex:1;min-width:220px;">
+                                        <label>Otros CVUs nuestros (opcional, separados por coma):</label>
+                                        <input type="text" id="finproCredExtraCvus" placeholder="0000000000000000000000, 0000000000000000000000" autocomplete="off" style="width:100%;">
+                                        <small style="color:#aaa;font-size:11px;">Un Cliente API de Finpro puede agrupar varias cuentas/CVUs: una transferencia que entre a cualquiera de estos también se toma como nuestra.</small>
                                     </div>
                                     <div class="form-group" style="flex:1;min-width:220px;">
                                         <label>URL base de la API:</label>
@@ -1313,7 +1321,19 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                                         <small style="color:#aaa;font-size:11px;">Por defecto queda la que figura en la documentación de Finpro (mw-dev.finpro.com.ar). Si Finpro te indica otra URL para operar, cargala acá.</small>
                                     </div>
                                 </div>
-                                <small style="color:#aaa;font-size:11px;display:block;margin-bottom:8px;">Dirección de aviso (callback) de los pagos: se la mandamos a Finpro en cada lote, no hay que cargarla en ningún lado: <code id="finproCallbackUrl">…</code></small>
+                                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                    <div class="form-group" style="flex:1;min-width:220px;">
+                                        <label>Secreto de firma de los webhooks:</label>
+                                        <input type="password" id="finproCredWebhookSecret" placeholder="(dejar vacío para no cambiarlo)" autocomplete="off" style="width:100%;">
+                                        <small style="color:#aaa;font-size:11px;">El mismo secreto para los dos webhooks (HMAC-SHA256). Sin secreto, los avisos de entrantes se rechazan y las cargas por Finpro solo salen por la verificación del comprobante.</small>
+                                    </div>
+                                </div>
+                                <div id="finproWebhookUrls" style="margin:4px 0 10px;padding:10px;border-radius:8px;background:rgba(0,0,0,0.30);font-size:12px;line-height:1.7;color:#ccc;">
+                                    <b style="color:#b388ff;">🔗 Direcciones para darle a Finpro en el alta de la integración</b>
+                                    <br>• <b>Webhook de notificaciones</b> (transferencias <b>entrantes</b> y <b>salientes</b> de nuestras cuentas — Finpro pide una URL para cada una: dale <b>la misma</b> para las dos): <code id="finproWebhookUrl">…</code> <button type="button" class="btn btn-secondary btn-sm" onclick="copyFinproUrl('finproWebhookUrl')" title="Copiar">📋</button>
+                                    <br>• <b>Webhook principal</b> (resultado de los retiros): <code id="finproCallbackUrl">…</code> <button type="button" class="btn btn-secondary btn-sm" onclick="copyFinproUrl('finproCallbackUrl')" title="Copiar">📋</button> — se manda como <code>callback_url</code> en cada transferencia; igual conviene dejarla registrada.
+                                    <br><small style="color:#aaa;">Para el alta pediles: <b>activar el webhook principal</b> (usamos <code>callback_url</code> en cada transferencia) y configurar en nuestro Cliente API las notificaciones de <b>entrantes</b> y de <b>salientes</b> hacia la MISMA URL de arriba, firmadas con este secreto de firma (headers <code>X-Webhook-Signature</code> / <code>X-Webhook-Timestamp</code>). Respondemos <code>200 {"success":true}</code> solo si la firma es válida. ⚠️ Mientras no esté hecha el alta, Finpro no manda avisos (la transferencia igual queda en su portal): las cargas por Finpro salen solo cuando el cliente manda el comprobante.</small>
+                                </div>
                                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                                     <button class="btn-primary" onclick="saveFinproCredentials()">🔐 Probar y guardar</button>
                                     <button class="btn btn-secondary btn-sm" onclick="clearFinproCredentials()" title="Borra lo cargado acá y vuelve a usar las credenciales/datos de AWS (SSM)">↩️ Volver a usar AWS (SSM)</button>

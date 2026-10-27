@@ -5,9 +5,14 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-27** — **Finpro reemplaza a GH Wallet** como segundo banco con
-> API (#368–#370): `finproService`, cargas verificadas por comprobante (`verify/incoming`, sin
-> webhook), retiros por `transfers/cvu` (un proceso por pago, secuencial por CVU), panel 🟣 Finpro
+> Última actualización: **2026-10-27** — **Webhooks de Finpro (#372):** entrantes por el webhook
+> SECUNDARIO firmado (`POST /api/finpro/webhook`, HMAC-SHA256 sobre rawBody, dedupe por
+> `notification_id` y por coelsa, titular de origen por Coelsa) y resultado de retiros por el
+> PRINCIPAL firmado (`/api/finpro/callback` confirma desde el payload); la verificación por
+> comprobante queda de respaldo. Secreto en panel/SSM (§2, §4.8, §5 "Finpro", §6, §9).
+> Antes ese día: **Finpro reemplaza a GH Wallet** como segundo banco con
+> API (#368–#370): `finproService`, cargas verificadas por comprobante (`verify/incoming`),
+> retiros por `transfers/cvu` (un proceso por pago, secuencial por CVU), panel 🟣 Finpro
 > (§2 BankMovement/Comprobante/PendingPayout, §4.8 env, §5 flujos, §6 panel, §7 crons, §9 trampas).
 > Antes ese mismo día: widget del casino adaptado a cada celular (alto/ancho
 > por dispositivo, agarre con texto + botón ⤢, ALIAS solo si está cargado, ✕ roja + "Cerrar y jugar";
@@ -149,11 +154,14 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
 
 ### Plata / banco automático (hgcash)
 - **BankMovement** — cada transferencia que un banco con API nos informa: hgcash
-  (`provider:'hgcash'`, webhook) o **Finpro** (`provider:'finpro'`, #368: nace de la
-  VERIFICACIÓN por comprobante `transfers/verify/incoming` — o, a futuro, del webhook/listado
-  — vía `_finproIngestIncoming`; `movementId:'fp:<notification.id>'` o `'fp:coelsa:<coelsa>'`
-  / `'fp:auth:<autorización>'`; `status` siempre `done`, `externalId` = authorization_code,
-  `processedEvents` = orígenes ya procesados). Los `provider:'ghwallet'` (`gw:<id>`) son
+  (`provider:'hgcash'`, webhook) o **Finpro** (`provider:'finpro'`: nace del **webhook
+  secundario** `POST /api/finpro/webhook` (#372, `movementId:'fp:<notification_id>'`) o de la
+  VERIFICACIÓN por comprobante `transfers/verify/incoming` (#370, `'fp:<notification.id>'` o
+  `'fp:coelsa:<coelsa>'` / `'fp:auth:<autorización>'`), siempre vía `_finproIngestIncoming`, que
+  además **dedupea por `coelsaCode`** (mismo coelsa con otro id ⇒ se reusa el movimiento);
+  `status` siempre `done`, `externalId` = authorization_code, `processedEvents` = orígenes ya
+  procesados (`'finpro.webhook'`, `'finpro.verify'`); las salidas del webhook quedan `Outbound` +
+  `ignored`). Los `provider:'ghwallet'` (`gw:<id>`) son
   HISTÓRICOS de GH Wallet (#332–#341, quitado en #368): se muestran, no se operan. `matchStatus`:
   pending→claiming→shadow_matched|auto_charged|manual_charged|needs_review|duplicate|
   error|ignored. Dedupe por `movementId` único.
@@ -642,7 +650,10 @@ Opcionales/afinado: `GIROX_TIMEOUT_MS` (20000) y las `GIROX_MIGRATION_*` del scr
 no está documentado → cargarlo en el panel cuando Finpro lo informe; el panel avisa en rojo si
 la URL contiene "dev"), `FINPRO_BANK_ID` (default `creedence`), `FINPRO_ACCOUNT` (n° de cuenta
 interno, para el saldo), `FINPRO_FROM_CVU` (nuestro CVU: origen de retiros / destino de
-cargas), `FINPRO_TIMEOUT_MS` (20000). 🪦 `GHWALLET_*` ya no se leen.
+cargas), `FINPRO_EXTRA_CVUS` (#372: otros CVUs nuestros del mismo Cliente API, coma-separados;
+el webhook acepta entrantes a cualquiera), `FINPRO_TIMEOUT_MS` (20000), **`FINPRO_WEBHOOK_SECRET`** (#372: secreto de firma de los
+webhooks, respaldo del panel — los dos valen) y `FINPRO_WEBHOOK_MAX_AGE_SEC` (ventana del
+`X-Webhook-Timestamp`, default 300 s). 🪦 `GHWALLET_*` ya no se leen.
 🪦 `GIROX_ADMIN_*` y `GIROX_AGENT_USER_ID` se fueron con el scraping del panel (#101).
 
 Si falta la config, el arranque lo grita por consola: `girox.isEnabled()` se chequea
@@ -835,8 +846,29 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   cada 60 s → `finpro.setCredentialsOverride/setSettingsOverride`; "Probar y guardar" exige token
   OK y, con cuenta, saldo OK). `_finproAccountCache` = titular de NUESTRO CVU
   (`accounts/information`) para `_destConsistentOk`.
-  **Cargas SIN webhook (#370):** Finpro no avisa las entradas. `hgcashMatchFromComprobante`, si
-  ningún movimiento pendiente matchea y Finpro está activo, llama `_finproVerifyComprobante`:
+  **Cargas por WEBHOOK (#372, canal principal):** las credenciales son de un **Cliente API** que
+  agrupa 1..N cuentas/CVUs y tiene UNA config de webhooks (una URL para ENTRANTES y otra para
+  SALIENTES: se le da la MISMA). Finpro avisa cada evento bancario de esas cuentas → `POST
+  /api/finpro/webhook` (público, rate-limit 240/min; despacha por `transfer_type`). Sin alta de
+  la URL no hay aviso (la transferencia queda en el portal) → solo verificación por comprobante.
+  Firma: `X-Webhook-Signature` = HMAC-SHA256(`X-Webhook-Timestamp` + "." + body crudo, secreto)
+  → `finpro.verifyWebhookSignature` sobre `req.rawBody` (el `verify` global de `express.json`),
+  secretos `_finproWebhookSecrets()` = panel (`Config['finproCredentials'].webhookSecretEnc`) y/o
+  SSM, ventana ±300 s. Sin secreto → 503 en producción (fail-closed); firma mala → 401; tipo
+  desconocido / sin id → 200 + log. Dedupe por `notification_id` (`fp:<id>` + `processedEvents`)
+  y por coelsa (en la ingesta). `transfer_type 'E'` a cualquiera de **nuestros CVUs**
+  (`finpro.ourCvus()` = `fromCvu` + `extraCvus` del panel / `FINPRO_EXTRA_CVUS`) →
+  `_finproIngestIncoming(n, 'webhook')` (se registra YA y se responde 200; `fromName`/`fromCUIT`/
+  concepto/`accountId` del payload si vienen — `_finproNotificationFromWebhook` lee varias claves
+  posibles) → si no vino el titular, por Coelsa (`_finproLookupPayer`: `accounts/information` con
+  `cvu = cbu_from`, cache 24 h) → `hgcashMatchFromMovement`. Salidas → `Outbound ignored`
+  (libro/cierre). Entrante a un CVU que no es ninguno de los configurados → `ignored` + warn. Contadores `_finproWebhookStats`
+  en `GET /api/admin/finpro/diag`. Un comprobante que llega DESPUÉS matchea el `fp:` pendiente
+  (coelsa o nombre); `_finproVerifyComprobante` corta sin llamar a verify si el coelsa del
+  comprobante ya está registrado.
+  **Cargas por VERIFICACIÓN (#370, respaldo):** si el aviso no llegó (webhook caído, sin secreto,
+  tardío), `hgcashMatchFromComprobante`, cuando ningún movimiento pendiente matchea y Finpro está
+  activo, llama `_finproVerifyComprobante`:
   `transfers/verify/incoming` con el dato más fuerte (`coelsa_id` del comprobante → N° de
   operación con pinta de coelsa → `amount + occurred_at(createdAt) + window_minutes 180 +
   to_cvu`). `confirmed` con confianza exact/high y mismo monto → `_finproIngestIncoming(notification,
@@ -849,9 +881,9 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   carga) — el chat va a Abiertos igual, con la pista "Finpro sigue verificando". `ambiguous` o
   confianza `medium` o monto distinto → `needs_review` + chat a Abiertos ("coincidencia
   ambigua"), NO se carga. 400/401/403 → `error` (credenciales/permiso `movements`), sin
-  reintento. ⚠️ verify solo valida ACREDITADAS: **no hay detección de reversiones** para Finpro.
-  Punto de extensión para cuando lleguen Webhooks / "Listado para conciliación":
-  `_finproIngestIncoming(notification, 'webhook'|'list')` + `hgcashMatchFromMovement`.
+  reintento. ⚠️ Ni el webhook (solo acreditaciones) ni verify informan reversiones: **no hay
+  débito automático** para Finpro. Un "Listado para conciliación" futuro entra por
+  `_finproIngestIncoming(notification, 'list')` + `hgcashMatchFromMovement` (misma dedupe).
   **Retiros (#369):** `Config['bankProvider']='finpro'` → `_payPayoutViaFinpro`: alias → CVU +
   titular por `accounts/information` (`resolvedCbu`/`lookupName`), claim atómico, mismo
   `_deductChipsAtConfirm`, `POST /transfers/cvu` con UN proceso por pago (`process_id` uuid v4 =
@@ -870,12 +902,23 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   código de la tabla (o forma 2xxx/04xx/05xx) o `fail_count>0` sin coelsa → `ERROR` con texto
   en español; terminó con `success_count≥1`, sin fallas ni código de error pero sin coelsa →
   DONE con warning (decisión defensiva); otro → sigue `paying` (`hgStatus
-  'finished_sin_resultado'`). `POST /api/finpro/callback` (público, rate-limit propio, siempre
-  200) es solo una PISTA: busca el payout por `process_id` y confirma por consulta. Finpro no
+  'finished_sin_resultado'`). `POST /api/finpro/callback` = webhook PRINCIPAL (público,
+  rate-limit propio): con **firma válida** (misma HMAC/secreto que el secundario) y filas en
+  `data[]` → `_finproApplySignedCallback` resuelve DESDE EL PAYLOAD (payout por `fpProcessId` =
+  `process_id` o `fpTransactionId` = `transaction_id`; `completed` + `response_code` no-error
+  (`'0200'`) → DONE con `fpCoelsaId`; `failed`/código de error → ERROR + `fpAccepted:false`);
+  firma presente pero inválida → 401 y nada; sin firma válida (sin secreto / payload viejo de
+  solo contadores) → PISTA: busca el payout por `process_id` y confirma por consulta
+  (`_finproSyncPayout`). Nunca se paga por un body sin firmar. Finpro no
   manda comprobante PDF: el operador ve el coelsa (`fpCoelsaId`).
-  **Panel:** `GET/POST /api/admin/finpro/config`, `GET/POST/DELETE /api/admin/finpro/credentials`,
-  `GET /api/admin/finpro/account`, `GET /api/admin/finpro/diag`, `POST /api/admin/finpro/verify`
-  (verificación manual, solo consulta). 🪦 `/api/ghwallet/webhook`, `/api/admin/ghwallet/*`,
+  **Panel:** `GET/POST /api/admin/finpro/config`, `GET/POST/DELETE /api/admin/finpro/credentials`
+  (+ `webhookSecret`, vacío = no cambiar, #372), `GET /api/admin/finpro/account`,
+  `GET /api/admin/finpro/diag` (incluye `webhooks` y `callbacks`), `POST /api/admin/finpro/verify`
+  (verificación manual, solo consulta). `_finproPublicState()` expone `webhookUrl`, `callbackUrl` y
+  `webhookSecret {configured, source, last4, maxAgeSec}`; `POST /api/admin/banks` devuelve
+  `warnings[]` (recibir por Finpro sin secreto / sin CVU avisa, no bloquea).
+  **Rutas públicas de Finpro (sin auth, antes de `authMiddleware`):** `POST /api/finpro/webhook`
+  (secundario: entrantes) y `POST /api/finpro/callback` (principal: retiros). 🪦 `/api/ghwallet/webhook`, `/api/admin/ghwallet/*`,
   `ghwalletService`, `_pollHeldGhwalletPayments`, `_autoDebitReversedGhwallet` se fueron en #368;
   lo viejo (`provider:'ghwallet'`, `paidVia:'ghwallet'`, `gwPayoutId`) solo se lee/muestra
   (`_bankLabel('ghwallet')` = "GH Wallet"; `/sync` de un pago GH responde 400 explicando).
@@ -1197,7 +1240,8 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   (hgcash / Finpro / los dos / ninguno → `hgcash.enabled` + `finpro.enabled`) y por cuál salen
   los retiros (`bankProvider` ∈ `['hgcash','finpro']`; 'ghwallet' viejo = hgcash) vía
   `GET/POST /api/admin/banks` (rechaza activar Finpro sin credenciales + CVU/cuenta); abajo, un
-  bloque por banco: 🟡 hgcash (modo, cuenta, credenciales, reenvío) y **🟣 Finpro** (aviso rojo si
+  bloque por banco: 🟡 hgcash (modo, cuenta, credenciales, reenvío) y **🟣 Finpro** (secreto de
+  firma de los webhooks + las dos URLs para el alta, #372; aviso rojo si
   la URL es de desarrollo, línea de estado, modo, credenciales + bankId + cuenta + CVU + URL
   base con "🔐 Probar y guardar" / "↩️ Volver a usar AWS", saldo + titular del CVU, URL del
   callback, "🔎 Diagnóstico" = últimas llamadas/token/callbacks/re-verificaciones/movimientos/
@@ -1284,9 +1328,11 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   pipeline de matcheo/auto-carga (`hgcashMatch*`, `hgcashAutoCarga`, `HgcashCharge`). Un
   cambio en ese pipeline afecta a los dos. Cada movimiento se gatea con la config de SU
   banco (`_bankCfgForMovement`; `provider:'ghwallet'` histórico ⇒ `enabled:false`); los
-  retiros salen por `Config['bankProvider']`. **Finpro no tiene webhook de entradas**: la
-  carga depende de que el cliente mande el comprobante (verify) — sin comprobante no hay
-  movimiento; verify no informa reversiones. **Un pago Finpro = un `process_id`**: nunca
+  retiros salen por `Config['bankProvider']`. **Finpro entrantes = webhook primero (#372),
+  verificación por comprobante de respaldo**: el webhook exige el secreto de firma (panel/SSM) y
+  `req.rawBody` (no tocar el `verify` de `express.json`); la ingesta dedupea por
+  `notification_id` Y por coelsa — no crear movimientos Finpro por otro camino que
+  `_finproIngestIncoming`. Ningún canal informa reversiones. **Un pago Finpro = un `process_id`**: nunca
   generar uno nuevo si el anterior fue aceptado (`fpAccepted:true`) ni reintentar a ciegas tras
   un timeout (el poll decide). **Secuencial por CVU** (2454). **Token 1 h** (`x-access-token`
   solo en `accounts/information`; el resto va solo con key/secret). **URL default = DEV**.
