@@ -8,6 +8,19 @@
 
 ## Sesión 2026-10-27
 
+### 367. FIX widget del casino: en celular abre SIEMPRE al máximo (el achique ya no se guarda) — SW v211 / ui.js?v=367
+- **Owner (captura iPhone 400×791):** "no abre al máximo para arriba, ¿es porque no es la primera
+  vez que abre el usuario y queda ajustado a como lo dejó antes?". Sí: el ancho ya se adaptaba
+  (de lado a lado), pero el alto venía de `localStorage vip_widget_h`, guardado al arrastrar el
+  agarre o tocar ⤡ en una apertura anterior (#300 lo persistía y #366 lo respetó). Un achique
+  de una vez dejaba el panel chico para siempre — lo contrario de "que abra bien abierto".
+- **Ahora (`ui.js`, idéntico en los dos repos):** en celular (`_isPhoneScreen`) el alto elegido
+  vive en memoria (`VIP.ui._drawerSessionH`, `_drawerRememberH`) mientras el panel está abierto
+  (sobrevive a rotación/teclado) y se olvida al cerrarlo (`closeCasinoChat`): cada apertura vuelve
+  al máximo. El `vip_widget_h` viejo del teléfono se ignora. En escritorio sigue persistiendo
+  como antes. `node --check` OK; solo front → redeploy del zip. PROBAR: abrir → máximo; ⤡ o
+  arrastrar → se achica; cerrar con ✕ y reabrir → máximo otra vez.
+
 ### 366. Widget del casino: ✕ ROJA bien visible + "🎰 Cerrar y jugar" en el pie — SW v210 / ui.js?v=366
 - **Owner:** "que aparezca la X para cerrar el chat y ver el casino de fondo, sino la gente ve el
   chat ilimitadamente". Con el panel a pantalla completa (#365) la ✕ translúcida de 28px del

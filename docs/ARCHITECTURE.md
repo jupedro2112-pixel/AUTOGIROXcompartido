@@ -7,7 +7,7 @@
 >
 > Última actualización: **2026-10-27** — widget del casino adaptado a cada celular (alto/ancho
 > por dispositivo, agarre con texto + botón ⤢, ALIAS solo si está cargado, ✕ roja + "Cerrar y jugar";
-> §6 PWA, WORKLOG #365–#366).
+> §6 PWA, WORKLOG #365–#367).
 > Antes (2026-10-26): réplica de PICA ROJA (4 tandas): interruptores de
 > funciones (`featureFlags`, `Config['features']`, todo OFF), registro `open|invite`, sistema de
 > notificaciones anterior gateado por `legacyNotifs`, Alertas de estafa, Datos IA, Historias, Centro de
@@ -1060,7 +1060,9 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   existiendo, pero **sólo como camino de respaldo** cuando el SSO falla.
 - **Widget "Cargas Automáticas" sobre el casino — tamaño (#300 → #365):** `#casinoChatDrawer` es
   un panel absoluto dentro de `#casinoOverlay`, anclado al cuadrante de la burbuja. Alto:
-  `_applyDrawerHeight` (ui.js) = `localStorage vip_widget_h` (lo que el cliente dejó) o el default
+  `_applyDrawerHeight` (ui.js) = lo que el cliente dejó (celular: solo en memoria mientras está
+  abierto, `_drawerSessionH`, se olvida al cerrar → cada apertura abre al máximo, #367; escritorio:
+  `localStorage vip_widget_h`) o el default
   del dispositivo (`_drawerDefaultH`: celular ≤ 640px → TODO el alto disponible y ancho
   `100vw − 32px`; escritorio → 600px / 72% del alto, 380px de ancho), siempre acotado por
   `_drawerMaxH` = `innerHeight − 32 − safe-area` (padding real del overlay). Se re-aplica en cada
