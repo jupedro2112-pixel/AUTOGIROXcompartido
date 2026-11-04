@@ -91,7 +91,10 @@ VIP.loadAccessFlags = function (attempt) {
     fetch(`${VIP.config.API_URL}/api/config/access`, { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('http ' + r.status)); })
         .then(function (j) { VIP.applyAccessFlags({ sms: j.smsEnabled === true, signup: j.registrationEnabled === true, usernamePrefix: j.usernamePrefix,
-            registrationMode: j.registrationMode, registerInviteText: j.registerInviteText, stories: !!(j.features && j.features.stories === true) }); }) // #360
+            registrationMode: j.registrationMode, registerInviteText: j.registerInviteText, stories: !!(j.features && j.features.stories === true) });
+            // #373: página del casino de COMANDOS (/sys_casino_url) — respaldo cuando el SSO falla.
+            try { if (typeof j.playUrl === 'string' && /^https:\/\//i.test(j.playUrl)) VIP.config.PLATFORM_URL = j.playUrl; } catch (_) {}
+        }) // #360
         .catch(function () {
             // Red lenta (Tor/3G): un par de reintentos; mientras tanto queda lo cacheado.
             if ((attempt || 0) < 2) setTimeout(function () { VIP.loadAccessFlags((attempt || 0) + 1); }, 4000 * ((attempt || 0) + 1));

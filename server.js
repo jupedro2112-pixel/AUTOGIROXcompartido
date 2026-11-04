@@ -450,8 +450,11 @@ const landingIpLimiter = createIpSmsLimiter(
 // ============================================
 // SEGURIDAD - HEADERS DE SEGURIDAD
 // ============================================
-// CSP precomputada una vez (antes se armaba el array + join en CADA request).
-const CSP_HEADER_VALUE = [
+// CSP precomputada (antes se armaba el array + join en CADA request). #373: se rearma SOLO cuando
+// cambia la página del casino de COMANDOS (`/sys_casino_url`), para que el iframe del casino
+// acepte también ese dominio (`_setCasinoFrameOrigin`).
+function _buildCspHeader(extraFrameSrc) {
+  return [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://apis.google.com https://cdn.jsdelivr.net https://unpkg.com https://connect.facebook.net",
   "script-src-elem 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com https://apis.google.com https://cdn.jsdelivr.net https://unpkg.com https://connect.facebook.net",
@@ -464,7 +467,7 @@ const CSP_HEADER_VALUE = [
   // el iframe y el recuadro queda en blanco.
   // Se listan las dos formas del dominio porque el link de SSO puede volver con o sin
   // `www` según cómo esté configurado el casino.
-  "frame-src 'self' https://*.firebaseapp.com https://*.google.com https://www.facebook.com https://1girox.com https://*.1girox.com",
+  "frame-src 'self' https://*.firebaseapp.com https://*.google.com https://www.facebook.com https://1girox.com https://*.1girox.com" + (extraFrameSrc ? ' ' + extraFrameSrc : ''),
   "worker-src 'self' blob:",
   "manifest-src 'self'",
   "object-src 'none'",
@@ -476,6 +479,21 @@ const CSP_HEADER_VALUE = [
   "frame-ancestors 'none'",
   "media-src 'self' data: blob:"
 ].join('; ');
+}
+let CSP_HEADER_VALUE = _buildCspHeader('');
+// #373: `origin` = https://dominio del casino de COMANDOS (o vacío). Sale de `new URL().origin`, así que
+// no puede traer `;` ni espacios. Se suma también el comodín del dominio (el link puede volver con `www`).
+function _setCasinoFrameOrigin(origin) {
+  let extra = '';
+  try {
+    if (origin) {
+      const u = new URL(origin);
+      const bare = u.hostname.replace(/^www\./i, '');
+      extra = `${u.origin} ${u.protocol}//*.${bare}`;
+    }
+  } catch (_) { extra = ''; }
+  CSP_HEADER_VALUE = _buildCspHeader(extra);
+}
 
 function securityHeaders(req, res, next) {
   res.setHeader('X-Frame-Options', 'DENY');
@@ -4833,7 +4851,7 @@ app.use(async (req, res, next) => {
 app.get('/api/config/access', async (req, res) => {
   const sw = await getAccessSwitches();
   res.set('Cache-Control', 'no-store');
-  const out = { smsEnabled: sw.smsEnabled, registrationEnabled: sw.registrationOpen, usernamePrefix: USERNAME_PREFIX_DEFAULT, registrationMode: 'open', registerInviteText: null, features: { stories: false } };
+  const out = { smsEnabled: sw.smsEnabled, registrationEnabled: sw.registrationOpen, usernamePrefix: USERNAME_PREFIX_DEFAULT, registrationMode: 'open', registerInviteText: null, features: { stories: false }, playUrl: girox.getPlayUrl() }; // #373 playUrl
   try { out.usernamePrefix = await getUsernamePrefix(); } catch (_) {}
   // #360: modo de registro (abierto / sólo con invitación) + funciones públicas prendidas, para que la PWA se adapte sin sesión.
   try {
@@ -7210,6 +7228,35 @@ app.post('/api/auth/login-otp-request', authLimiter, smsIpLimiter, async (req, r
 });
 
 // Verificar OTP para login por teléfono
+// #373 (réplica #247 de SANTINOGANAMOS) PÁGINA DEL CASINO editable en COMANDOS → `/sys_casino_url`.
+// Vacío = la de siempre (GIROX_PLAY_URL o https://1girox.com). En 1girox el botón entra por SSO: el
+// link de /session (`https://<casino>/auth/sso?code=…`) se re-apunta a ESTE dominio en
+// `girox.createSession` (applyPlayDomain) → el cliente sigue entrando logueado. Tiene que ser un
+// dominio del MISMO casino de 1girox (espejo); otra página no reconoce el código. Sólo https (el
+// casino se abre embebido en la PWA: un http lo bloquea el navegador). El CSP del iframe suma ese
+// dominio (`_setCasinoFrameOrigin`). Se relee al arrancar, cada 60 s (las otras instancias de EB) y
+// al guardar/vaciar el comando (esta instancia, al instante).
+function _cleanCasinoUrl(raw) {
+  const v = String(raw || '').trim().split(/\s+/)[0] || '';
+  if (!v) return '';
+  try {
+    const u = new URL(/^https?:\/\//i.test(v) ? v : 'https://' + v);
+    if (u.protocol !== 'https:' || !u.hostname.includes('.')) return null;
+    return u.toString().replace(/\/+$/, '');
+  } catch (_) { return null; }
+}
+async function _refreshCasinoUrl() {
+  if (typeof girox.setPlayUrlOverride !== 'function') return;
+  try {
+    const cmd = await Command.findOne({ name: '/sys_casino_url', isActive: true }).lean();
+    const url = _cleanCasinoUrl(cmd && cmd.response);
+    const prev = girox.getPlayUrl();
+    girox.setPlayUrlOverride(url || null);
+    _setCasinoFrameOrigin(url ? new URL(url).origin : '');
+    if (girox.getPlayUrl() !== prev) logger.info(`[casino-url] el botón del casino ahora abre ${girox.getPlayUrl()} (SSO re-apuntado a ese dominio)`);
+  } catch (e) { logger.warn(`[casino-url] no se pudo leer /sys_casino_url: ${e.message}`); }
+}
+
 app.post('/api/auth/login-otp-verify', authLimiter, async (req, res) => {
   try {
     const { phone, code } = req.body;
@@ -8717,6 +8764,9 @@ app.get('/api/admin/sync-status', authMiddleware, adminMiddleware, async (req, r
       inProgress: false,
       startedAt: null,
       lastSync: null,
+      // #373: si en COMANDOS hay otra página del casino, `redirectUrl` ya viene con ESE dominio.
+      paginaDelCasino: girox.getPlayUrl(),
+      linkOriginalDe1girox: session.platformRedirectUrl || session.redirectUrl,
       totalSynced: jugayganaUsers,
       lastResult: null,
       localUsers: totalUsers,
@@ -13206,6 +13256,13 @@ app.post('/api/movements/withdraw', authMiddleware, async (req, res) => {
       } catch (e) { /* tracking nunca bloquea */ }
 
       res.json({
+    {
+      // #373 NO es un mensaje: a qué página (dominio) manda el botón del casino.
+      name: '/sys_casino_url',
+      description: 'PÁGINA DEL CASINO (no es un mensaje). Escribí SOLO la dirección a la que manda el botón PÁGINA CASINO AQUÍ, por ejemplo https://1girox.com. El cliente sigue entrando LOGUEADO (se cambia sólo el dominio del link de acceso), así que tiene que ser una dirección del MISMO casino de 1girox (un dominio espejo). Si la página cambia o deja de andar, la cambiás acá y listo (tarda hasta 1 minuto). Vacío = la de siempre.',
+      type: 'info',
+      response: ''
+    },
         success: true,
         message: `Retiro de $${amountNum} realizado correctamente`,
         newBalance: result.data?.user_balance_after,
@@ -21119,7 +21176,7 @@ app.post('/api/auth/access-link', authLimiter, async (req, res) => {
     res.json({
       token: jwtToken,
       casinoUrl,
-      casinoLogoutUrl: casinoLogoutUrl || process.env.GIROX_PLAY_LOGOUT_URL || null,
+      casinoLogoutUrl: casinoLogoutUrl || girox.applyPlayDomain(process.env.GIROX_PLAY_LOGOUT_URL || null) || null, // #373 mismo dominio que el SSO
       user: { id: user.id, username: user.username, role: user.role, mustChangePassword: forcePwd }
     });
   } catch (error) {
@@ -22636,6 +22693,10 @@ app.get('/api/admin/referrals/:userId/netwin', authMiddleware, adminMiddleware, 
     res.json({ success: true, period: { key: _periodKey.getCurrentPeriodKey(), label: _periodKey.getPeriodLabel(_periodKey.getCurrentPeriodKey()) },
       rate: lv.rate, pct: lv.pct, mode: lv.mode, active: activeCount,
       totals: { netwinMonth: Math.round(sumNet), commissionMonth: Math.round(sumNet * lv.rate), partial: rows.some(r => r.netwinMonth === null), skipped: Math.max(0, withDeposits.length - picked) },
+    // #373 la página del casino tiene que ser una dirección web https válida (vacía = la de siempre).
+    if (name === '/sys_casino_url' && String(response || '').trim() && !_cleanCasinoUrl(response)) {
+      return res.status(400).json({ error: 'Poné sólo la dirección de la página del casino con https, por ejemplo https://1girox.com' });
+    }
       referrals: rows });
   } catch (e) {
     logger.warn(`[referrals] admin netwin ${req.params.userId}: ${e.message}`);
@@ -22648,6 +22709,7 @@ app.get('/api/admin/referrals/:userId/netwin', authMiddleware, adminMiddleware, 
 // ============================================================================
 const DailyRouletteSpin = require('./src/models/DailyRouletteSpin');
 const CashbackClaim = require('./src/models/CashbackClaim');
+    if (name === '/sys_casino_url') await _refreshCasinoUrl(); // #373 esta instancia, al instante
 
 // ============================================================
 // RULETA DIARIA v2 (#254, 2026-09-01) — premios CONFIGURABLES desde el panel
@@ -22673,6 +22735,7 @@ const DAILY_ROULETTE_DEFAULT = {
 };
 // Cache liviano para que _rouletteWeightedPick (sync, lo usa también el giro de
 // prueba del panel) vea la config vigente sin async.
+      if (cmd.name === '/sys_casino_url') await _refreshCasinoUrl(); // #373 vuelve a la de siempre
 let _dailyRouCfgCache = null;
 async function getDailyRouletteConfig() {
   try {
@@ -27555,4 +27618,6 @@ if (process.env.VERCEL) {
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   })();
-}
+}    _refreshCasinoUrl(); // #373
+    await _refreshCasinoUrl(); // #373 página del casino desde COMANDOS
+    setInterval(() => { _refreshCasinoUrl(); }, 60 * 1000);
